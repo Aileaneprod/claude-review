@@ -13,7 +13,7 @@ project repo                     claude-review
 ─────────────                    ─────────────
 ai-review.yml  ──── uses: ───▶   review.yml @v1
   permissions                      ├─ 7 guards
-  secrets: inherit                 ├─ scripts/
+  secrets: {token}                 ├─ scripts/
                                    └─ prompts/
 ```
 
@@ -22,6 +22,22 @@ the caller**: "When a reusable workflow is triggered by a caller workflow, the
 `github` context is always associated with the caller workflow." So
 `github.event.pull_request.number` and `github.repository` resolve to the
 project repo, and no PR details need to be passed as inputs.
+
+The wrapper passes exactly one secret, named explicitly:
+
+```yaml
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+```
+
+not `secrets: inherit`. `review.yml` only needs the one token, and `inherit`
+would forward every other secret the calling repo happens to have into a job
+it doesn't control. That mostly doesn't matter on a private repo, but several
+project repos here are public, and Actions logs on a public repo are public —
+an unrelated inherited secret leaking through a stray debug print in a future
+step would be a real problem, where the same mistake with only the Claude
+token present is not. Same principle as the `--allowedTools` restriction and
+the fork guard: grant exactly what's needed, nothing adjacent.
 
 Prompt changes ship to every repo by re-tagging `v1`. That is the entire point:
 one place to improve the review, not N.

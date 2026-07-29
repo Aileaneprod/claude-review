@@ -7,10 +7,12 @@
 # only ever downgrade the caller's token, never elevate it — so if these are
 # omitted the review job silently loses the ability to comment.
 #
-# `secrets: inherit` passes CLAUDE_CODE_OAUTH_TOKEN through. That secret has to
-# exist on this repo (or its org); secrets never travel between repositories.
-# jdfyras is a personal account, and GitHub has no user-level Actions secrets,
-# so for repos owned by jdfyras the secret must be set per repo.
+# The secret is passed explicitly by name rather than via `secrets: inherit`,
+# so this job only ever receives CLAUDE_CODE_OAUTH_TOKEN — not every other
+# secret this repo happens to have. That secret has to exist on this repo (or
+# its org); secrets never travel between repositories. jdfyras is a personal
+# account, and GitHub has no user-level Actions secrets, so for repos owned by
+# jdfyras the secret must be set per repo.
 #
 # Everything else is configured centrally. To override a default for this repo
 # only, add a .claude-review.yml at the repo root — see the template alongside
@@ -29,4 +31,5 @@ jobs:
       pull-requests: write
       id-token: write
     uses: jdfyras/claude-review/.github/workflows/review.yml@v1
-    secrets: inherit
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
