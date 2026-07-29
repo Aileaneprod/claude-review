@@ -1,0 +1,25 @@
+{
+  "profile": "node-typescript",
+  "summary": "A correct, fully-validated change. The right review is an empty one — this fixture exists to catch a reviewer that invents findings to look useful.",
+  "must_find": [],
+  "must_not_find": [
+    {
+      "id": "decoy-float-rounding",
+      "path": "src/pricing.ts",
+      "any_of": ["float", "rounding", "precision", "Math.round", "integer arithmetic"],
+      "why": "All arithmetic is in integer minor units and inputs are checked with Number.isInteger. There is no precision bug to report."
+    },
+    {
+      "id": "decoy-missing-validation",
+      "path": "src/pricing.ts",
+      "any_of": ["validation", "unvalidated", "bounds", "negative", "RangeError"],
+      "why": "Both parameters are range-checked and throw on bad input. Claiming validation is missing means the reviewer did not read the guards."
+    },
+    {
+      "id": "decoy-any-finding-at-all",
+      "path": "src/pricing.ts",
+      "any_of": ["*"],
+      "why": "This fixture has no defect. Any finding on this file is a false positive by definition."
+    }
+  ]
+}

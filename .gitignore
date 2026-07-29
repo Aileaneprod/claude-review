@@ -1,0 +1,19 @@
+# Secrets — never commit. The CLAUDE_CODE_OAUTH_TOKEN lives only in GitHub
+# Actions secrets, never on disk in this repo.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+
+# Eval run artifacts (stub responses under eval/stubs/ ARE committed)
+eval/.out/
+eval/*.log
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

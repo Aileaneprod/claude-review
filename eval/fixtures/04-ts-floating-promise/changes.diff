@@ -1,0 +1,21 @@
+diff --git a/src/orders.ts b/src/orders.ts
+index 2f8c1a0..9b40de3 100644
+--- a/src/orders.ts
++++ b/src/orders.ts
+@@ -20,7 +20,15 @@ function trackAsync(event: string, orderId: string): void {
+ export async function refundOrder(orderId: string): Promise<Order> {
+   const order = await db.orders.findById(orderId);
+   if (!order) {
+     throw new Error(`order ${orderId} not found`);
+   }
+
+   trackAsync("refund.started", orderId);
++
++  try {
++    const refunded = await db.orders.update(orderId, { status: "refunded" });
++    return refunded;
++  } catch (err) {
++    notifyOps(`refund failed for ${orderId}`, err);
++    throw err;
++  }
+ }

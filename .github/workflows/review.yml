@@ -1,0 +1,552 @@
+# Centralized AI pull-request review, called by a thin wrapper in each project
+# repo. See templates/wrapper.yml and docs/SETUP.md.
+#
+# The scarce resource here is Claude subscription quota, not runner minutes.
+# Every guard below exists to avoid spending a review that cannot produce value.
+
+name: Claude Review (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      profile:
+        description: "Prompt profile, or 'auto' to detect from repo contents."
+        type: string
+        default: auto
+      model:
+        description: >-
+          Model ID. Empty means let claude-code-action pick its own default,
+          which is almost always right. Model IDs change — read the current ones
+          from the Claude Code docs rather than pinning one from memory.
+        type: string
+        default: ""
+      max_turns:
+        description: "Agentic turn budget for a single review."
+        type: number
+        default: 20
+      max_findings:
+        description: "Hard cap on inline comments per review."
+        type: number
+        default: 12
+      max_diff_lines:
+        description: "Above this many changed lines, degrade to triage mode."
+        type: number
+        default: 2000
+      exclude_paths:
+        description: "Newline-separated globs to exclude. Replaces the defaults."
+        type: string
+        default: ""
+      fail_on_blocking:
+        description: "Fail the check run when a blocking finding exists."
+        type: boolean
+        default: false
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "Claude Code OAuth token from `claude setup-token`."
+        required: true
+
+# GUARD 0 — cancel superseded runs.
+# A push to a PR that is already being reviewed makes the in-flight review
+# worthless, so kill it rather than letting reviews stack up. This is the single
+# largest quota saver in the whole design.
+#
+# The group name is namespaced with `claude-review-` on purpose: GitHub warns
+# that a caller and a called workflow sharing a concurrency group value with
+# cancel-in-progress will cancel each other. This prefix cannot collide with a
+# caller's own group.
+concurrency:
+  group: claude-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The review itself.
+  #
+  # GUARD 1 — skip drafts.        A draft is not asking for review yet.
+  # GUARD 2 — skip bot authors.   Dependabot/Renovate PRs are machine-generated.
+  # GUARD 3 — skip the opt-out label.
+  # GUARD 4 — skip forks (see the fork-notice job below for the rationale).
+  #
+  # All four are metadata-only, so a skipped job never starts a runner and costs
+  # nothing at all.
+  # ---------------------------------------------------------------------------
+  review:
+    name: AI review
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.draft == false
+      && github.event.pull_request.user.type != 'Bot'
+      && !endsWith(github.event.pull_request.user.login, '[bot]')
+      && github.event.pull_request.user.login != 'dependabot'
+      && github.event.pull_request.user.login != 'renovate'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
+      && github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      # Work out which claude-review revision to use, so the scripts and prompts
+      # come from exactly the ref the caller pinned. A caller on @v1 can never
+      # accidentally run prompts from main, and no owner or repo name is
+      # hardcoded anywhere in this file.
+      #
+      # It must be `job_workflow_ref`, NOT `workflow_ref`. Inside a reusable
+      # workflow the github context belongs to the CALLER, so `workflow_ref` is
+      # the caller's wrapper file — using it would check out the project repo
+      # over itself and no scripts would be found. `job_workflow_ref` is
+      # documented as "for jobs using a reusable workflow, the ref path to the
+      # reusable workflow", which is this file.
+      #
+      # Shape: owner/claude-review/.github/workflows/review.yml@refs/tags/v1
+      - name: Resolve claude-review revision
+        id: self
+        env:
+          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JOB_WORKFLOW_REF:-}" ]; then
+            echo "::error title=Cannot resolve claude-review::github.job_workflow_ref is empty. This workflow must be invoked via 'uses:', not run directly."
+            exit 1
+          fi
+          case "$JOB_WORKFLOW_REF" in
+            */.github/workflows/*@*) : ;;
+            *)
+              echo "::error title=Unexpected job_workflow_ref::Could not parse '${JOB_WORKFLOW_REF}'."
+              exit 1
+              ;;
+          esac
+          repo="${JOB_WORKFLOW_REF%%/.github/*}"
+          ref="${JOB_WORKFLOW_REF##*@}"
+          printf 'repo=%s\n' "$repo" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\n'  "$ref"  >> "$GITHUB_OUTPUT"
+          printf 'Using tooling from %s at %s\n' "$repo" "$ref"
+
+      # Full history is required so `git merge-base` finds the real fork point.
+      # Forks are already excluded above, so the base commit is guaranteed to be
+      # present in this repository.
+      - name: Check out the pull request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check out claude-review
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.self.outputs.repo }}
+          ref: ${{ steps.self.outputs.ref }}
+          path: .claude-review-tooling
+
+      - name: Collect workflow inputs
+        id: overrides
+        env:
+          IN_PROFILE: ${{ inputs.profile }}
+          IN_MODEL: ${{ inputs.model }}
+          IN_MAX_TURNS: ${{ inputs.max_turns }}
+          IN_MAX_FINDINGS: ${{ inputs.max_findings }}
+          IN_MAX_DIFF_LINES: ${{ inputs.max_diff_lines }}
+          IN_EXCLUDE_PATHS: ${{ inputs.exclude_paths }}
+          IN_FAIL_ON_BLOCKING: ${{ inputs.fail_on_blocking }}
+        run: |
+          set -euo pipefail
+          # Inputs reach python through the environment, never through string
+          # interpolation into code.
+          python3 <<'PY' > "$RUNNER_TEMP/overrides.json"
+          import json
+          import os
+
+          out = {}
+          if os.environ.get("IN_PROFILE"):
+              out["profile"] = os.environ["IN_PROFILE"]
+          if os.environ.get("IN_MODEL"):
+              out["model"] = os.environ["IN_MODEL"]
+          for key, name in (
+              ("IN_MAX_TURNS", "max_turns"),
+              ("IN_MAX_FINDINGS", "max_findings"),
+              ("IN_MAX_DIFF_LINES", "max_diff_lines"),
+          ):
+              value = os.environ.get(key, "").strip()
+              if value:
+                  out[name] = int(float(value))
+          flag = os.environ.get("IN_FAIL_ON_BLOCKING", "").strip().lower()
+          if flag in ("true", "false"):
+              out["fail_on_blocking"] = flag == "true"
+          globs = [
+              line.strip()
+              for line in os.environ.get("IN_EXCLUDE_PATHS", "").splitlines()
+              if line.strip()
+          ]
+          if globs:
+              out["exclude_paths"] = globs
+
+          print(json.dumps(out))
+          PY
+          printf 'Workflow input overrides: %s\n' "$(cat "$RUNNER_TEMP/overrides.json")"
+
+      - name: Resolve configuration
+        id: config
+        run: |
+          set -euo pipefail
+          .claude-review-tooling/scripts/resolve-config.sh \
+            --repo-root . \
+            --overrides "$RUNNER_TEMP/overrides.json" \
+            > "$RUNNER_TEMP/config.json"
+          cat "$RUNNER_TEMP/config.json"
+
+      # GUARD 5 — nothing reviewable left after exclusions.
+      # GUARD 6 — oversized diff degrades to triage mode over the riskiest files.
+      - name: Compute reviewed file set
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          printf 'Diffing %s..%s\n' "$merge_base" "$HEAD_SHA"
+          git diff --name-only "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/all-files.txt"
+          git diff --numstat  "$merge_base" "$HEAD_SHA" > "$RUNNER_TEMP/numstat.txt"
+
+          python3 <<'PY'
+          import json
+          import os
+          import re
+
+          tmp = os.environ["RUNNER_TEMP"]
+
+          with open(os.path.join(tmp, "config.json"), encoding="utf-8") as fh:
+              config = json.load(fh)
+
+          def glob_to_regex(pattern):
+              """Translate a path glob, respecting `/` boundaries.
+
+              `*` and `?` stay within one segment; `**` crosses segments. Python's
+              fnmatch does not make this distinction, which is why we do it here.
+              """
+              out = ["^"]
+              i = 0
+              while i < len(pattern):
+                  if pattern.startswith("**/", i):
+                      out.append("(?:.*/)?")
+                      i += 3
+                  elif pattern.startswith("**", i):
+                      out.append(".*")
+                      i += 2
+                  elif pattern[i] == "*":
+                      out.append("[^/]*")
+                      i += 1
+                  elif pattern[i] == "?":
+                      out.append("[^/]")
+                      i += 1
+                  else:
+                      out.append(re.escape(pattern[i]))
+                      i += 1
+              out.append("$")
+              return re.compile("".join(out))
+
+          excludes = [glob_to_regex(p) for p in config.get("exclude_paths") or []]
+
+          with open(os.path.join(tmp, "all-files.txt"), encoding="utf-8") as fh:
+              all_files = [ln.strip() for ln in fh if ln.strip()]
+
+          kept = [f for f in all_files if not any(rx.match(f) for rx in excludes)]
+          kept_set = set(kept)
+
+          # Changed lines, counted only over files that survived exclusion, so a
+          # regenerated lockfile cannot push a small PR into triage mode.
+          changed_lines = 0
+          with open(os.path.join(tmp, "numstat.txt"), encoding="utf-8") as fh:
+              for line in fh:
+                  parts = line.rstrip("\n").split("\t")
+                  if len(parts) != 3:
+                      continue
+                  added, removed, path = parts
+                  if path not in kept_set:
+                      continue
+                  for value in (added, removed):
+                      if value.isdigit():
+                          changed_lines += int(value)
+
+          limit = int(config.get("max_diff_lines", 2000))
+          triage = changed_lines > limit
+
+          HIGH_RISK = re.compile(
+              r"(auth|login|session|token|secret|password|credential|key|"
+              r"payment|billing|invoice|charge|stripe|"
+              r"migrat|schema|models?/|database|/db/|repositor|query|"
+              r"config|settings|env|"
+              r"requirements\.txt|pyproject\.toml|package\.json|go\.mod|Gemfile|"
+              r"Dockerfile|docker-compose|\.github/workflows/)",
+              re.IGNORECASE,
+          )
+
+          if triage:
+              reviewed = [f for f in kept if HIGH_RISK.search(f)]
+              # A huge diff touching nothing risk-flagged still deserves a look;
+              # take a bounded slice rather than reviewing nothing at all.
+              if not reviewed:
+                  reviewed = kept[:25]
+          else:
+              reviewed = kept
+
+          with open(os.path.join(tmp, "reviewed-files.txt"), "w",
+                    encoding="utf-8", newline="\n") as fh:
+              fh.write("\n".join(reviewed) + ("\n" if reviewed else ""))
+
+          summary = (
+              "changed=%d kept=%d reviewed=%d lines=%d limit=%d triage=%s"
+              % (len(all_files), len(kept), len(reviewed), changed_lines, limit, triage)
+          )
+          print(summary)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("has_files=%s\n" % ("true" if reviewed else "false"))
+              fh.write("triage=%s\n" % ("true" if triage else "false"))
+              fh.write("reviewed_count=%d\n" % len(reviewed))
+              fh.write("changed_lines=%d\n" % changed_lines)
+          PY
+
+      - name: Skip — nothing to review
+        if: steps.scope.outputs.has_files != 'true'
+        run: |
+          set -euo pipefail
+          {
+            echo "### AI review skipped"
+            echo
+            echo "Every changed file is excluded by \`exclude_paths\`, so there was"
+            echo "nothing to review. No Claude quota was spent."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=AI review skipped::No reviewable files after exclusions"
+
+      - name: Detect stack profile
+        id: profile
+        if: steps.scope.outputs.has_files == 'true'
+        run: |
+          set -euo pipefail
+          configured="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("profile","auto"))' "$RUNNER_TEMP/config.json")"
+          if [ "$configured" = "auto" ] || [ -z "$configured" ]; then
+            detected="$(.claude-review-tooling/scripts/detect-profile.sh . | paste -sd, -)"
+          else
+            detected="$configured"
+          fi
+          printf 'names=%s\n' "$detected" >> "$GITHUB_OUTPUT"
+          printf 'Profile(s): %s\n' "$detected"
+
+      # Findings already posted on this PR are fed back into the prompt so a
+      # re-review after a push does not repeat what the author has already read.
+      - name: Load previously posted findings
+        if: steps.scope.outputs.has_files == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          .claude-review-tooling/scripts/post-review.sh \
+            --mode pre \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "$PR_NUMBER" \
+            --out "$RUNNER_TEMP/prior-findings.md"
+
+      - name: Build the review prompt
+        id: prompt
+        if: steps.scope.outputs.has_files == 'true'
+        env:
+          TRIAGE: ${{ steps.scope.outputs.triage }}
+          PROFILES: ${{ steps.profile.outputs.names }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          args=(
+            --config "$RUNNER_TEMP/config.json"
+            --repo "$GITHUB_REPOSITORY"
+            --pr "$PR_NUMBER"
+            --changed-files "$RUNNER_TEMP/reviewed-files.txt"
+            --profiles "$PROFILES"
+            --out "$RUNNER_TEMP/prompt.md"
+          )
+          if [ "$TRIAGE" = "true" ]; then
+            args+=(--triage)
+          fi
+          if [ -s "$RUNNER_TEMP/prior-findings.md" ]; then
+            args+=(--prior-findings "$RUNNER_TEMP/prior-findings.md")
+          fi
+          .claude-review-tooling/scripts/build-prompt.sh "${args[@]}"
+
+          # The action's `prompt` input takes inline text only — no file paths —
+          # so the assembled prompt is handed over as a multiline step output
+          # with a random delimiter.
+          delim="PROMPT_$(python3 -c 'import secrets;print(secrets.token_hex(8))')"
+          {
+            printf 'text<<%s\n' "$delim"
+            cat "$RUNNER_TEMP/prompt.md"
+            printf '\n%s\n' "$delim"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Assemble claude_args
+        id: args
+        if: steps.scope.outputs.has_files == 'true'
+        run: |
+          set -euo pipefail
+          model="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$RUNNER_TEMP/config.json")"
+          turns="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("max_turns",20))' "$RUNNER_TEMP/config.json")"
+
+          # Read and comment only. No Edit, no Write, no unrestricted Bash — the
+          # reviewer must never be able to modify the code it is reviewing.
+          tools='mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Read,Grep,Glob'
+
+          {
+            printf 'value<<CLAUDE_ARGS_EOF\n'
+            printf -- '--max-turns %s\n' "$turns"
+            if [ -n "$model" ]; then
+              printf -- '--model %s\n' "$model"
+            fi
+            printf -- '--allowedTools "%s"\n' "$tools"
+            printf 'CLAUDE_ARGS_EOF\n'
+          } >> "$GITHUB_OUTPUT"
+
+      # The review itself. `continue-on-error` is deliberate and load-bearing:
+      # a reviewer that fails must never block a merge.
+      #
+      # track_progress and use_sticky_comment are intentionally left at their
+      # defaults. track_progress:true would force "tag mode" and discard our
+      # prompt-driven agent mode entirely. use_sticky_comment matches the first
+      # comment by any bot whose login contains "claude" — ignoring HTML markers —
+      # and would clobber the summary comment this workflow manages itself.
+      - name: Review
+        id: claude
+        if: steps.scope.outputs.has_files == 'true'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: ${{ steps.args.outputs.value }}
+
+      - name: Post the sticky summary
+        id: summary
+        if: steps.scope.outputs.has_files == 'true' && steps.claude.outcome == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          args=(--mode post --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER")
+          if [ -n "${EXECUTION_FILE:-}" ] && [ -f "$EXECUTION_FILE" ]; then
+            args+=(--execution-file "$EXECUTION_FILE")
+          fi
+          .claude-review-tooling/scripts/post-review.sh "${args[@]}"
+
+      # The action exposes no usable `conclusion` output — it sets one
+      # internally but does not declare it, and composite actions only surface
+      # declared outputs. `steps.claude.outcome` is the reliable signal.
+      - name: Report that the review was unavailable
+        if: steps.scope.outputs.has_files == 'true' && steps.claude.outcome == 'failure'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### AI review unavailable"
+            echo
+            echo "The reviewer did not complete. This does **not** block the merge —"
+            echo "review the changes yourself, and check the workflow logs if this repeats."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=AI review unavailable::The reviewer step failed; merge is not blocked"
+          gh pr comment "$PR_NUMBER" \
+            --body "🤖 AI review unavailable for this push — the reviewer step did not complete. This does not block merging." \
+            || echo "Could not post the notice comment; the job summary above records it."
+
+      # Opt-in only. An AI reviewer should not hold merge authority by default.
+      - name: Enforce blocking findings
+        if: steps.scope.outputs.has_files == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          enforce="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("fail_on_blocking",False))' "$RUNNER_TEMP/config.json")"
+          if [ "$enforce" != "True" ]; then
+            echo "fail_on_blocking is off; not gating the merge."
+            exit 0
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
+            --paginate --slurp > "$RUNNER_TEMP/review-comments.json"
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+
+          path = os.path.join(os.environ["RUNNER_TEMP"], "review-comments.json")
+          with open(path, encoding="utf-8") as fh:
+              pages = json.load(fh)
+
+          comments = []
+          for page in pages if isinstance(pages, list) else []:
+              comments.extend(page if isinstance(page, list) else [page])
+
+          blocking = [c for c in comments if "🔴" in (c.get("body") or "")]
+          for comment in blocking:
+              print("blocking: %s:%s" % (comment.get("path"), comment.get("line")))
+
+          if blocking:
+              sys.stderr.write(
+                  "%d blocking finding(s); failing because fail_on_blocking is on.\n"
+                  % len(blocking)
+              )
+              sys.exit(1)
+          print("No blocking findings.")
+          PY
+
+  # ---------------------------------------------------------------------------
+  # GUARD 4 — fork pull requests.
+  #
+  # Secrets are not available to `pull_request` runs from a fork, so the review
+  # cannot work. We deliberately do NOT reach for `pull_request_target` as a
+  # workaround: that runs with the base repository's secrets, and checking out
+  # untrusted contributor code in a job holding a Claude subscription token is a
+  # straightforward credential-exfiltration path. The reviewer is worth less
+  # than the token. Do not "fix" this.
+  #
+  # On a public repo the GITHUB_TOKEN is read-only for fork PRs regardless of
+  # the permissions block, so the explanatory comment can legitimately fail to
+  # post. The job summary and the annotation always work, so the human always
+  # finds out why nothing happened.
+  # ---------------------------------------------------------------------------
+  fork-notice:
+    name: AI review skipped (fork)
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.draft == false
+      && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
+      && github.event.pull_request.head.repo.full_name != github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Explain the skip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### AI review skipped — pull request from a fork"
+            echo
+            echo "Head repository \`${HEAD_REPO}\` differs from \`${GITHUB_REPOSITORY}\`."
+            echo "GitHub does not expose secrets to fork pull requests, so the reviewer"
+            echo "cannot authenticate. Running it via \`pull_request_target\` would expose"
+            echo "the subscription token to untrusted code, which we will not do."
+            echo
+            echo "Review this pull request manually."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice title=AI review skipped::Fork pull request — secrets are unavailable"
+          gh pr comment "$PR_NUMBER" \
+            --body "🤖 AI review skipped: pull requests from forks cannot access the reviewer's credentials. This PR needs a manual review." \
+            || echo "Comment could not be posted (fork PRs get a read-only token); the job summary records the reason."

@@ -1,0 +1,88 @@
+# Prompt regression harness.
+#
+# workflow_dispatch ONLY — never on push, never on pull_request. A live run
+# calls the model once per fixture and spends Claude subscription quota, so it
+# must always be a deliberate act.
+#
+# Stub mode (the default) replays committed responses and costs nothing, so it
+# is safe to run any time to check that the harness itself still works.
+#
+# A run here is the AUTHORITATIVE baseline: the runner is clean, with no local
+# CLAUDE.md, MCP servers or hooks to perturb the result. A local
+# `./eval/run-eval.sh --live` is advisory only — see docs/TUNING.md.
+
+name: Prompt eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      live:
+        description: "Call the real model (spends subscription quota)"
+        type: boolean
+        default: false
+      fixture:
+        description: "Run a single fixture by name (blank = all)"
+        type: string
+        default: ""
+
+concurrency:
+  group: claude-review-eval-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    name: ${{ inputs.live && 'Live eval' || 'Stub eval' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only needed for a live run. This is the single place in the repo that
+      # installs anything — the reviewer pipeline itself depends on nothing
+      # beyond bash, git, gh and python3, all preinstalled. The eval harness
+      # drives the `claude` CLI directly, which has to come from somewhere.
+      - name: Install the Claude Code CLI
+        if: inputs.live
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run the harness
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          LIVE: ${{ inputs.live }}
+          FIXTURE: ${{ inputs.fixture }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$LIVE" = "true" ]; then
+            if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+              echo "::error title=Missing secret::A live eval needs CLAUDE_CODE_OAUTH_TOKEN on this repo."
+              exit 1
+            fi
+            args+=(--live)
+          fi
+          if [ -n "$FIXTURE" ]; then
+            args+=(--fixture "$FIXTURE")
+          fi
+          ./eval/run-eval.sh "${args[@]}" | tee "$RUNNER_TEMP/eval.txt"
+
+      - name: Publish the report
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### Prompt eval"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/eval.txt" 2>/dev/null || echo "(the harness produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload run artifacts
+        if: always() && inputs.live
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-output
+          path: eval/.out/
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-04",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/orders.ts",
+        "line": 32,
+        "severity": "important",
+        "title": "Floating promise in the catch block can crash the process",
+        "evidence": "notifyOps(`refund failed for ${orderId}`, err);",
+        "why_it_matters": "notifyOps returns a promise that is neither awaited nor caught. If the ops notification fails, the rejection is unhandled, which terminates the Node process — and it happens precisely on the error path, where reliability matters most.",
+        "suggested_fix": "await notifyOps(...) inside the catch, or attach a .catch() as trackAsync does."
+      }
+    ]
+  }
+}

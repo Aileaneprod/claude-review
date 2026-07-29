@@ -1,0 +1,20 @@
+{
+  "profile": "generic",
+  "summary": "Raw user term interpolated into SQL; the allow-listed sort column is the decoy.",
+  "must_find": [
+    {
+      "id": "sql-injection",
+      "path": "api/search.py",
+      "min_severity": "blocking",
+      "any_of": ["injection", "search_customers", "parameter", "interpolat", "concatenat", "term"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-sort-column-allowlisted",
+      "path": "api/search.py",
+      "any_of": ["list_products", "sort_by", "ORDER BY", "SortDirection"],
+      "why": "sort_by is validated against SORT_COLUMNS and raises before reaching the query; direction is an Enum with two fixed values. The f-string is safe because neither value can be attacker-controlled."
+    }
+  ]
+}

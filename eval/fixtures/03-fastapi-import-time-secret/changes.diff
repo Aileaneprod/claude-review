@@ -1,0 +1,10 @@
+diff --git a/app/settings.py b/app/settings.py
+index 7b31d02..c40e8a1 100644
+--- a/app/settings.py
++++ b/app/settings.py
+@@ -25,3 +25,5 @@ def get_settings() -> Settings:
+
+ # Public, non-secret identifier for the analytics bundle. Safe to ship.
+ ANALYTICS_PUBLIC_KEY = "pk_live_analytics_5f2a91c0"
++
++STRIPE_SECRET_KEY = os.environ["STRIPE_SECRET_KEY"]

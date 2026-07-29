@@ -1,0 +1,20 @@
+{
+  "profile": "python-fastapi",
+  "summary": "Unbounded to_list(None) load, with a properly-bounded paginated query as the decoy.",
+  "must_find": [
+    {
+      "id": "unbounded-to-list",
+      "path": "app/admin.py",
+      "min_severity": "important",
+      "any_of": ["to_list(none)", "to_list(None)", "unbounded", "pagination", "paginate", "entire collection", "into memory", "no limit"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-list-events-is-bounded",
+      "path": "app/admin.py",
+      "any_of": ["list_events", "db.events.find", "max_page_size"],
+      "why": "list_events is bounded by Query(ge=1, le=settings.max_page_size) and .limit(limit); flagging it means the reviewer did not read the parameter validation."
+    }
+  ]
+}

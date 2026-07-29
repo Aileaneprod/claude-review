@@ -1,0 +1,79 @@
+# Default configuration for claude-review.
+#
+# A repo may override any of these by adding a `.claude-review.yml` at its root;
+# repo values win. See templates/.claude-review.yml for a documented example.
+#
+# IMPORTANT — this file is parsed by a deliberately small YAML reader (see
+# scripts/resolve-config.sh). Only two shapes are supported:
+#
+#     key: scalar
+#     key:
+#       - list item
+#       - list item
+#
+# No nested mappings, no flow collections (`[a, b]`), no multi-line scalars, no
+# anchors. Anything else is a hard error, not a silent misparse. This keeps the
+# pipeline dependent on nothing beyond stock python3. See docs/ARCHITECTURE.md.
+
+# Which prompt profile to use. `auto` detects from repo contents.
+# Explicit values: python-fastapi, node-typescript, react-native, n8n, generic.
+profile: auto
+
+# Model ID. Empty means "let claude-code-action choose its own default", which
+# is the right answer almost always. Model IDs change; see docs/TUNING.md before
+# pinning one here.
+model: ""
+
+# Maximum agentic turns for a single review. The main lever on cost per review.
+max_turns: 20
+
+# Hard cap on inline comments per review. Beyond this the reviewer keeps the
+# highest-severity findings and says how many it dropped.
+max_findings: 12
+
+# Above this many changed lines the review degrades to triage mode: only
+# highest-risk files are read, and the summary says the review was partial.
+max_diff_lines: 2000
+
+# When true, a blocking finding fails the check run. Off by default — an AI
+# reviewer should not have merge authority.
+fail_on_blocking: false
+
+# Paths excluded from review. Glob syntax: `*` matches within a path segment,
+# `**` matches across segments, `?` matches one character.
+exclude_paths:
+  - "**/*.lock"
+  - "**/*.min.js"
+  - "**/*.min.css"
+  - "**/*.map"
+  - "package-lock.json"
+  - "yarn.lock"
+  - "pnpm-lock.yaml"
+  - "poetry.lock"
+  - "Pipfile.lock"
+  - "uv.lock"
+  - "**/node_modules/**"
+  - "**/vendor/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/.next/**"
+  - "**/__snapshots__/**"
+  - "**/*.snap"
+  - "**/migrations/**/*.sql"
+  - "**/*.svg"
+  - "**/*.png"
+  - "**/*.jpg"
+  - "**/*.jpeg"
+  - "**/*.gif"
+  - "**/*.ico"
+  - "**/*.webp"
+  - "**/*.pdf"
+  - "**/*.woff"
+  - "**/*.woff2"
+  - "**/*.ttf"
+  - "**/*.eot"
+  - "**/*.pb.go"
+  - "**/*_pb2.py"
+  - "**/*.generated.*"
+  - "**/generated/**"
+  - "**/CHANGELOG.md"

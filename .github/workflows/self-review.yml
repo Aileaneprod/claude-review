@@ -1,0 +1,24 @@
+# Dogfooding: claude-review reviews its own pull requests.
+#
+# This is the same wrapper every project repo gets (templates/wrapper.yml), with
+# one difference — it calls the reusable workflow by local path rather than by
+# `owner/claude-review/...@v1`. A local reference always runs the version on the
+# PR branch, so a change to review.yml or to the prompts is exercised by the
+# very pull request that proposes it.
+#
+# If a prompt change makes the reviewer noisy, this is where you find out first.
+
+name: Self review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    uses: ./.github/workflows/review.yml
+    secrets: inherit

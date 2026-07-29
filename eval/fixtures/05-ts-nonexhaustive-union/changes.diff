@@ -1,0 +1,20 @@
+diff --git a/src/billing.ts b/src/billing.ts
+index 4c0aa19..e71b3f5 100644
+--- a/src/billing.ts
++++ b/src/billing.ts
+@@ -24,3 +24,16 @@ export function describe(event: PlanEvent): string {
+       return assertNever(event);
+   }
+ }
++
++export function revenueDelta(event: PlanEvent): number {
++  switch (event.kind) {
++    case "created":
++      return 1;
++    case "upgraded":
++      return 2;
++    case "cancelled":
++      return -1;
++  }
++  return 0;
++}

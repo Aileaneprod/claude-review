@@ -1,0 +1,29 @@
+diff --git a/app/reports.py b/app/reports.py
+index 3a1f2c9..b7e4d81 100644
+--- a/app/reports.py
++++ b/app/reports.py
+@@ -26,3 +26,23 @@ async def fetch_logo(tenant_id: str) -> bytes:
+             f"{settings.asset_base_url}/logos/{tenant_id}", timeout=5
+         ).content
+     )
++
++
++@router.get("/{report_id}/export")
++async def export_report(report_id: str, user=Depends(current_user)):
++    """Render a report to PDF and return the download URL."""
++    logo = await fetch_logo(user.tenant_id)
++
++    # Poll the renderer until the artifact is ready.
++    response = requests.post(
++        f"{settings.renderer_url}/render",
++        json={"report_id": report_id, "logo_len": len(logo)},
++        timeout=120,
++    )
++    while response.json()["status"] != "done":
++        time.sleep(2)
++        response = requests.get(
++            f"{settings.renderer_url}/jobs/{response.json()['job_id']}",
++            timeout=30,
++        )
++
++    return {"url": response.json()["url"]}

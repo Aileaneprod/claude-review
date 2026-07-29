@@ -1,0 +1,20 @@
+{
+  "profile": "python-fastapi",
+  "summary": "Blocking sync I/O on the event loop, with a correctly-threadpooled call as the decoy.",
+  "must_find": [
+    {
+      "id": "sync-io-in-async",
+      "path": "app/reports.py",
+      "min_severity": "important",
+      "any_of": ["time.sleep", "event loop", "export_report", "blocks the", "blocking sync", "sync i/o"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-threadpool-is-correct",
+      "path": "app/reports.py",
+      "any_of": ["fetch_logo", "run_in_threadpool", "threadpool"],
+      "why": "fetch_logo already dispatches the sync requests call to a threadpool; flagging it means the reviewer pattern-matched on `requests` without reading the wrapper."
+    }
+  ]
+}

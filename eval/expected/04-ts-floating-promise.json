@@ -1,0 +1,20 @@
+{
+  "profile": "node-typescript",
+  "summary": "notifyOps is an unhandled floating promise on the error path; trackAsync is a correctly-handled fire-and-forget decoy.",
+  "must_find": [
+    {
+      "id": "floating-promise-notifyops",
+      "path": "src/orders.ts",
+      "min_severity": "important",
+      "any_of": ["notifyOps", "floating", "unhandled rejection", "not awaited", "unawaited", "await"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-trackasync-is-handled",
+      "path": "src/orders.ts",
+      "any_of": ["trackAsync", "auditLog", "void auditLog"],
+      "why": "trackAsync is explicitly marked `void` with a .catch() and a comment explaining the intent. Flagging it means the reviewer matched on 'not awaited' without reading the handler."
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+diff --git a/app/admin.py b/app/admin.py
+index 91c2ab4..5de77f0 100644
+--- a/app/admin.py
++++ b/app/admin.py
+@@ -19,3 +19,10 @@ async def list_events(
+     query = {"_id": {"$gt": cursor}} if cursor else {}
+     # Bounded: `limit` is validated by Query(ge=1, le=max_page_size) above.
+     return await db.events.find(query).sort("_id", 1).limit(limit).to_list(limit)
++
++
++@router.get("/users/export")
++async def export_users(admin=Depends(require_admin)):
++    """Full user export for the admin console."""
++    users = await db.users.find({"tenant_id": admin.tenant_id}).to_list(None)
++    return {"count": len(users), "users": users}

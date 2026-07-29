@@ -1,0 +1,29 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-10",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "migrations/0042_archive_stale_accounts.sql",
+        "line": 19,
+        "severity": "blocking",
+        "title": "Irreversible DROP COLUMN with no rollback path",
+        "evidence": "ALTER TABLE accounts DROP COLUMN legacy_referral_code;",
+        "why_it_matters": "The column and its data are gone permanently, and a deploy rollback cannot restore them. Any still-running old application instance that selects that column will also start erroring mid-deploy.",
+        "suggested_fix": "Split into two releases: stop reading the column, ship, then drop it in a later migration."
+      },
+      {
+        "path": "migrations/0042_archive_stale_accounts.sql",
+        "line": 17,
+        "severity": "important",
+        "title": "Archive-then-delete is not atomic and not idempotent",
+        "evidence": "DELETE FROM accounts WHERE last_seen_at < now() - INTERVAL '2 years';",
+        "why_it_matters": "The INSERT and DELETE are separate statements with no transaction, so a failure between them deletes accounts that were never archived. now() also moves between runs, so a re-run acts on a different row set — unlike the CREATE statements above, which are correctly guarded.",
+        "suggested_fix": "Wrap both statements in a transaction and pin the cutoff to a fixed timestamp."
+      }
+    ]
+  }
+}

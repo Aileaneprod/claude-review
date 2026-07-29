@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-02",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "app/admin.py",
+        "line": 26,
+        "severity": "important",
+        "title": "Unbounded query loads every user into memory",
+        "evidence": "users = await db.users.find({\"tenant_id\": admin.tenant_id}).to_list(None)",
+        "why_it_matters": "to_list(None) has no ceiling, so a large tenant exhausts the worker's memory and the response never completes.",
+        "suggested_fix": "Paginate with a cursor, or stream the export rather than materialising it."
+      }
+    ]
+  }
+}

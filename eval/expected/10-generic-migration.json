@@ -1,0 +1,20 @@
+{
+  "profile": "generic",
+  "summary": "Irreversible DROP COLUMN plus a non-idempotent, untransacted delete; the guarded CREATE statements are decoys.",
+  "must_find": [
+    {
+      "id": "irreversible-or-nonidempotent",
+      "path": "migrations/0042_archive_stale_accounts.sql",
+      "min_severity": "important",
+      "any_of": ["drop column", "irreversible", "rollback", "delete from", "transaction", "idempoten", "data loss", "re-run", "rerun"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-guarded-create-statements",
+      "path": "migrations/0042_archive_stale_accounts.sql",
+      "any_of": ["IF NOT EXISTS", "CREATE INDEX", "CREATE TABLE", "idx_accounts_last_seen"],
+      "why": "Both CREATE statements already use IF NOT EXISTS and are safe to re-run. Flagging them as non-idempotent means the reviewer did not read the guard it is complaining about the absence of."
+    }
+  ]
+}

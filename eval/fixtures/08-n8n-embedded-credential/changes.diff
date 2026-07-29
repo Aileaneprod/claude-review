@@ -1,0 +1,26 @@
+diff --git a/workflows/lead-sync.n8n.json b/workflows/lead-sync.n8n.json
+index 1b7f0a3..d92c4e5 100644
+--- a/workflows/lead-sync.n8n.json
++++ b/workflows/lead-sync.n8n.json
+@@ -20,6 +20,26 @@
+       "position": [240, 300]
+     },
++    {
++      "parameters": {
++        "url": "https://api.crm.example.com/v1/leads",
++        "method": "POST",
++        "sendHeaders": true,
++        "headerParameters": {
++          "parameters": [
++            {
++              "name": "Authorization",
++              "value": "Bearer sk_live_EXAMPLE_NOT_A_REAL_KEY"
++            }
++          ]
++        }
++      },
++      "name": "Create CRM lead",
++      "type": "n8n-nodes-base.httpRequest",
++      "position": [520, 300]
++    }
+   ],

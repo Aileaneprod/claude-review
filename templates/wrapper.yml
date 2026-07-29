@@ -1,0 +1,32 @@
+# AI code review, delegated to the central claude-review repo.
+#
+# Copy this file into a project repo as .github/workflows/ai-review.yml.
+# Nothing needs editing — it already points at jdfyras/claude-review.
+#
+# The permissions block MUST live here, in the caller. A reusable workflow can
+# only ever downgrade the caller's token, never elevate it — so if these are
+# omitted the review job silently loses the ability to comment.
+#
+# `secrets: inherit` passes CLAUDE_CODE_OAUTH_TOKEN through. That secret has to
+# exist on this repo (or its org); secrets never travel between repositories.
+# jdfyras is a personal account, and GitHub has no user-level Actions secrets,
+# so for repos owned by jdfyras the secret must be set per repo.
+#
+# Everything else is configured centrally. To override a default for this repo
+# only, add a .claude-review.yml at the repo root — see the template alongside
+# this file.
+
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  review:
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    uses: jdfyras/claude-review/.github/workflows/review.yml@v1
+    secrets: inherit

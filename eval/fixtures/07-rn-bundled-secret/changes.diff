@@ -1,0 +1,22 @@
+diff --git a/src/config/keys.ts b/src/config/keys.ts
+index 8c1d4f2..a09be77 100644
+--- a/src/config/keys.ts
++++ b/src/config/keys.ts
+@@ -8,3 +8,18 @@ export const SUPABASE_ANON_KEY = Config.SUPABASE_ANON_KEY;
+
+ export const SUPABASE_URL = "https://xyzcompany.supabase.co";
++
++/** Server-side admin key used to sign upload tickets. */
++export const S3_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY";
++
++export async function signUpload(path: string): Promise<string> {
++  const response = await fetch(`${SUPABASE_URL}/storage/sign`, {
++    method: "POST",
++    headers: {
++      apikey: SUPABASE_ANON_KEY,
++      "x-amz-secret": S3_SECRET_ACCESS_KEY,
++    },
++    body: JSON.stringify({ path }),
++  });
++  return (await response.json()).url;
++}

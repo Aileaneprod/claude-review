@@ -1,0 +1,43 @@
+# Per-repo overrides for claude-review. Optional — delete any key you do not
+# want to change and the central default applies.
+#
+# Place this file at the root of the repo being reviewed. Values here win over
+# config/defaults.yml in the claude-review repo.
+#
+# Supported YAML is deliberately small: `key: scalar`, or `key:` followed by a
+# block list. No nested mappings, no `[a, b]` flow lists, no anchors. Anything
+# else fails the run with a file:line error rather than being misread.
+
+# Force a prompt profile instead of detecting one from repo contents.
+# One of: auto, python-fastapi, node-typescript, react-native, n8n, generic
+profile: auto
+
+# Pin a model for this repo. Empty means "use the action's own default", which
+# is what you want unless you have a specific reason. Model IDs change — read
+# the current ones from the Claude Code docs, do not copy one from memory.
+model: ""
+
+# Turn budget for a single review. Lower is cheaper and shallower.
+max_turns: 20
+
+# Maximum inline comments per review. Lower this on repos where reviews feel
+# noisy; the reviewer keeps the highest-severity findings and reports the rest
+# as a count.
+max_findings: 12
+
+# Above this many changed lines the review degrades to triage mode and covers
+# only the highest-risk files. Raise it for repos with large mechanical diffs.
+max_diff_lines: 2000
+
+# Fail the check run when a blocking finding exists. Off by default — think
+# hard before giving an AI reviewer merge authority.
+fail_on_blocking: false
+
+# Paths to skip. These REPLACE the central defaults rather than adding to them,
+# so if you set this, restate the exclusions you still want.
+#
+# exclude_paths:
+#   - "**/*.lock"
+#   - "**/node_modules/**"
+#   - "docs/**"
+#   - "**/*.generated.*"

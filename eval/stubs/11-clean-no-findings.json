@@ -1,0 +1,10 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 4,
+  "session_id": "stub-11",
+  "structured_output": {
+    "findings": []
+  }
+}

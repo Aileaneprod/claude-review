@@ -1,0 +1,45 @@
+{
+  "name": "Lead sync",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "lead-intake",
+        "httpMethod": "POST",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived"
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "17",
+          "name": "Lead intake shared secret"
+        }
+      },
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.crm.example.com/v1/leads",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer sk_live_EXAMPLE_NOT_A_REAL_KEY"
+            }
+          ]
+        }
+      },
+      "name": "Create CRM lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [520, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Create CRM lead", "type": "main", "index": 0 }]]
+    }
+  }
+}

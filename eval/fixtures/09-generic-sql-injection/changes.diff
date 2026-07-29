@@ -1,0 +1,19 @@
+diff --git a/api/search.py b/api/search.py
+index 5f9c1a2..7bd3e08 100644
+--- a/api/search.py
++++ b/api/search.py
+@@ -24,3 +24,14 @@ def list_products(sort_by: str, direction: SortDirection, limit: int = 50):
+     with connection.cursor() as cur:
+         cur.execute(sql, (limit,))
+         return cur.fetchall()
++
++
++def search_customers(term: str):
++    """Free-text customer search."""
++    sql = (
++        "SELECT id, email FROM customers "
++        f"WHERE email LIKE '%{term}%' OR name LIKE '%{term}%'"
++    )
++    with connection.cursor() as cur:
++        cur.execute(sql)
++        return cur.fetchall()

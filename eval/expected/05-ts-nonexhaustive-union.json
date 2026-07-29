@@ -1,0 +1,20 @@
+{
+  "profile": "node-typescript",
+  "summary": "revenueDelta silently drops the 'paused' variant; describe() has a never-guard and is the decoy.",
+  "must_find": [
+    {
+      "id": "nonexhaustive-switch",
+      "path": "src/billing.ts",
+      "min_severity": "important",
+      "any_of": ["revenueDelta", "exhaustive", "paused", "missing case", "silently", "fallthrough", "falls through"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-describe-is-exhaustive",
+      "path": "src/billing.ts",
+      "any_of": ["describe(", "assertNever", "function describe"],
+      "why": "describe() ends in assertNever(event), so the compiler enforces exhaustiveness. Flagging it means the reviewer did not recognise the never-guard idiom."
+    }
+  ]
+}

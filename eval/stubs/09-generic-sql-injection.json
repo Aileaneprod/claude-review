@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-09",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "api/search.py",
+        "line": 33,
+        "severity": "blocking",
+        "title": "SQL injection: search term interpolated straight into the query",
+        "evidence": "f\"WHERE email LIKE '%{term}%' OR name LIKE '%{term}%'\"",
+        "why_it_matters": "`term` is free text from the caller and goes into the SQL string unescaped, so a quote character breaks out of the literal and the rest of the statement is attacker-controlled. Note list_products above interpolates safely only because sort_by is allow-listed first.",
+        "suggested_fix": "Pass the term as a bound parameter: cur.execute(sql, (f\"%{term}%\", f\"%{term}%\"))."
+      }
+    ]
+  }
+}

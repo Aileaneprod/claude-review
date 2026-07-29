@@ -1,0 +1,17 @@
+diff --git a/src/screens/LiveOrdersScreen.tsx b/src/screens/LiveOrdersScreen.tsx
+index 6ad12b8..fe3390c 100644
+--- a/src/screens/LiveOrdersScreen.tsx
++++ b/src/screens/LiveOrdersScreen.tsx
+@@ -15,6 +15,12 @@ export function LiveOrdersScreen({ tenantId }: { tenantId: string }) {
+   useEffect(() => {
+     const unsubscribe = subscribeToOrders(tenantId, setOrders);
+     return unsubscribe;
+   }, [tenantId]);
+
++  useEffect(() => {
++    fetchOrderTotals(tenantId).then((value) => {
++      setTotals(value);
++    });
++  }, [tenantId]);
++
+   return (

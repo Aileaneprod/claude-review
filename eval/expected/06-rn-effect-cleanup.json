@@ -1,0 +1,26 @@
+{
+  "profile": "react-native",
+  "summary": "setState after unmount from an uncancelled async effect; the subscription effect and useAppState hook are decoys that do clean up.",
+  "must_find": [
+    {
+      "id": "setstate-after-unmount",
+      "path": "src/screens/LiveOrdersScreen.tsx",
+      "min_severity": "important",
+      "any_of": ["unmount", "cleanup", "cancel", "setTotals", "fetchOrderTotals", "abort", "stale"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-subscription-cleans-up",
+      "path": "src/screens/LiveOrdersScreen.tsx",
+      "any_of": ["subscribeToOrders", "unsubscribe", "useAppState"],
+      "why": "The subscription effect returns unsubscribe, and useAppState tears down its own AppState listener. Both are correct; flagging them is pattern-matching on 'useEffect' without reading the return value."
+    },
+    {
+      "id": "decoy-flatlist-key-is-fine",
+      "path": "src/screens/LiveOrdersScreen.tsx",
+      "any_of": ["keyExtractor", "FlatList key", "index as key"],
+      "why": "keyExtractor uses item.id, not the array index. There is nothing wrong with it."
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 4,
+  "session_id": "stub-05",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/billing.ts",
+        "line": 35,
+        "severity": "important",
+        "title": "revenueDelta is not exhaustive and silently returns 0 for paused plans",
+        "evidence": "  }\n  return 0;",
+        "why_it_matters": "The 'paused' variant falls through to `return 0`, so paused plans quietly contribute nothing to revenue and no test or compiler error will catch it. Unlike describe(), this switch has no never-guard, so future variants will be dropped too.",
+        "suggested_fix": "Handle 'paused' explicitly and end with `default: return assertNever(event)`."
+      }
+    ]
+  }
+}

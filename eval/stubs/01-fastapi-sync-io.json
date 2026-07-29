@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 6,
+  "session_id": "stub-01",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "app/reports.py",
+        "line": 40,
+        "severity": "blocking",
+        "title": "Blocking sync I/O inside an async endpoint stalls the event loop",
+        "evidence": "time.sleep(2)",
+        "why_it_matters": "export_report is `async def`, so time.sleep and the bare requests calls block the whole worker for the duration of the render poll, not just this request.",
+        "suggested_fix": "Use an async HTTP client and asyncio.sleep, or dispatch through run_in_threadpool as fetch_logo already does."
+      }
+    ]
+  }
+}

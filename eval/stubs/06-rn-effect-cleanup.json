@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 6,
+  "session_id": "stub-06",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/screens/LiveOrdersScreen.tsx",
+        "line": 21,
+        "severity": "important",
+        "title": "Async effect sets state after unmount with no cancellation",
+        "evidence": "fetchOrderTotals(tenantId).then((value) => {\n      setTotals(value);\n    });",
+        "why_it_matters": "If the screen unmounts, or tenantId changes, before the fetch resolves, setTotals runs on an unmounted component and a stale response can overwrite a newer one. Unlike the subscription effect above it, this one returns no cleanup.",
+        "suggested_fix": "Track a cancelled flag in the effect cleanup, or pass an AbortSignal to fetchOrderTotals."
+      }
+    ]
+  }
+}
