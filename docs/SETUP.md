@@ -353,11 +353,41 @@ Copy [`templates/wrapper.yml`](../templates/wrapper.yml) into the target repo
 at `.github/workflows/ai-review.yml`, commit, and push (or open a PR) yourself.
 The file already points at `jdfyras/claude-review@v1` — nothing to edit.
 
+### It must land on the DEFAULT branch
+
+This one is easy to get wrong and produces a workflow that is present, valid,
+and permanently silent.
+
+The Claude GitHub App **refuses to run a workflow whose content differs from the
+copy on the repository's default branch.** That is the control that stops a pull
+request from rewriting the workflow to steal your token. The run log says:
+
+```
+Workflow validation failed. The workflow file must exist and have identical
+content to the version on the repository's default branch.
+```
+
+Two consequences:
+
+- **On a repo with a `develop` → `main` split, merging into `develop` is not
+  enough.** Reviews stay silent until the identical file is on `main` too.
+  `install-wrapper.sh` now warns when you pass a `--base` that is not the
+  default branch, and prints the second command to run.
+- **The pull request that adds the workflow never gets reviewed by it** — its
+  copy differs from the default branch by definition. That is expected, not a
+  bug. Reviews start on the *next* pull request.
+
 ### Don't forget
 
 Before this works on that repo, it also needs:
 - **The secret** from step 3 (`gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo ...`)
 - **The GitHub App** from step 4 installed on that repo
+- **The wrapper on the default branch**, per the section directly above
+- **Actions minutes available on the account that owns the repo.** Private
+  repositories draw from a monthly allowance; when it is exhausted every run
+  fails instantly with `startup_failure` and an empty workflow name, before any
+  step executes. Check <https://github.com/settings/billing>. Public repos are
+  unlimited, so this only bites private ones.
 
 If either is missing, the review step will fail quietly (it never blocks a
 merge) — see the troubleshooting table at the bottom.
@@ -415,6 +445,8 @@ config/defaults.yml  <  workflow inputs  <  that repo's own .claude-review.yml
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Every run is `startup_failure`, empty workflow name, no jobs, instantly | Actions minutes exhausted on the owning account (private repos only), or Actions disabled for the repo | Check <https://github.com/settings/billing>. Confirm by looking for *any* successful Actions run on *any* private repo of that account — if there are none, it's account-level, not your workflow |
+| Run succeeds but the reviewer posted nothing, log says "Workflow validation failed … identical content to the version on the repository's default branch" | The wrapper isn't on the default branch, or this PR modifies the wrapper | Merge the wrapper to the default branch too. A PR that changes the wrapper is never reviewed by it — that's the App's anti-exfiltration control |
 | "workflow was not found" in the Actions log | `v1` tag doesn't exist yet, or (if private) access isn't configured | Redo step 5; if private, redo step 6 |
 | Review job doesn't run at all | The PR is a draft, its author is a bot, it has the `skip-ai-review` label, or it's from a fork | Expected behavior — see "When nothing happens" below |
 | Comment says "AI review skipped — pull request from a fork" | Expected — forks never get secrets, by GitHub design, so it can't authenticate. Review it manually. |

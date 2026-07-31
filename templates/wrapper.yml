@@ -3,6 +3,17 @@
 # Copy this file into a project repo as .github/workflows/ai-review.yml.
 # Nothing needs editing — it already points at jdfyras/claude-review.
 #
+# IT MUST LAND ON THE REPOSITORY'S DEFAULT BRANCH. The Claude GitHub App
+# refuses to run when the workflow file differs from the copy on the default
+# branch — that is what stops a pull request from rewriting the workflow to
+# steal the token. Consequences:
+#   * On a repo using a develop/main split, merging this into `develop` alone
+#     is not enough; reviews stay silent until it is on the default branch too.
+#   * The pull request that ADDS this file never gets reviewed by it. That is
+#     expected. Reviews begin on the next pull request.
+# The run log says: "Workflow validation failed. The workflow file must exist
+# and have identical content to the version on the repository's default branch."
+#
 # The permissions block MUST live here, in the caller. A reusable workflow can
 # only ever downgrade the caller's token, never elevate it — so if these are
 # omitted the review job silently loses the ability to comment.
@@ -44,9 +55,10 @@ on:
 # behaviour. Declaring it here, in an ordinary caller workflow, is guaranteed
 # to work.
 #
-# The group name must DIFFER from the one review.yml uses. GitHub warns that a
-# caller and a called workflow sharing a group value with cancel-in-progress
-# will cancel each other.
+# The group name must DIFFER from the one review.yml uses. GitHub's documented
+# warning is that if a caller and a called workflow share a group value with
+# cancel-in-progress, the workflow already running gets cancelled — so matching
+# names here would have the two fighting instead of cooperating.
 concurrency:
   group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true

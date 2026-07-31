@@ -77,12 +77,30 @@ cleanup() { rm -rf "$work_dir"; }
 trap cleanup EXIT
 
 # --- resolve the base branch -------------------------------------------------
+if ! gh api "repos/${target}" >"${work_dir}/repo.json" 2>"${work_dir}/repo.err"; then
+  sed 's/^/install-wrapper:   /' "${work_dir}/repo.err" >&2 || true
+  die "cannot read repos/${target} — check the name and your gh auth"
+fi
+default_branch="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["default_branch"])' "${work_dir}/repo.json")"
+
 if [ -z "$base_branch" ]; then
-  if ! gh api "repos/${target}" >"${work_dir}/repo.json" 2>"${work_dir}/repo.err"; then
-    sed 's/^/install-wrapper:   /' "${work_dir}/repo.err" >&2 || true
-    die "cannot read repos/${target} — check the name and your gh auth"
-  fi
-  base_branch="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["default_branch"])' "${work_dir}/repo.json")"
+  base_branch="$default_branch"
+fi
+
+# The Claude GitHub App refuses to run a workflow whose content differs from the
+# copy on the default branch — that is what prevents a pull request from
+# rewriting the workflow to exfiltrate the token. Installing onto some other
+# branch therefore produces a workflow that is present, valid, and permanently
+# silent, which is a miserable thing to debug. Say so up front.
+if [ "$base_branch" != "$default_branch" ]; then
+  printf 'install-wrapper: WARNING: installing onto "%s", but the default branch is "%s".\n' \
+    "$base_branch" "$default_branch" >&2
+  printf 'install-wrapper:   The Claude GitHub App only runs a workflow that matches the\n' >&2
+  printf 'install-wrapper:   copy on the default branch, so reviews will NOT run until this\n' >&2
+  printf 'install-wrapper:   file also lands on "%s" with identical content.\n' "$default_branch" >&2
+  printf 'install-wrapper:   Install onto "%s" as well:\n' "$default_branch" >&2
+  printf 'install-wrapper:     %s %s --base %s --confirm\n' \
+    "$(basename "${BASH_SOURCE[0]}")" "$target" "$default_branch" >&2
 fi
 
 # --- compare against what is already there -----------------------------------
