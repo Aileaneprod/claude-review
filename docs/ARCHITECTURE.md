@@ -59,14 +59,31 @@ Seven guards, cheapest first:
 | 4 | Skip forks | job `if:` + `fork-notice` job | ~5s |
 | 5 | Empty changed set after excludes | step after checkout | ~20s |
 | 6 | Oversized diff → triage | step after checkout | narrows scope |
+| 7 | No `CLAUDE_CODE_OAUTH_TOKEN` on the repo | first step of the job | ~5s |
 
 Guards 1–4 are metadata-only, so a skipped job never provisions a runner at all.
 
 **Guard 0 is the big one.** Pushing three times to a PR in five minutes would
 otherwise mean three overlapping reviews of which two are already obsolete.
-`cancel-in-progress` makes the newest push win. The group name is namespaced
-(`claude-review-…`) because GitHub warns that a caller and callee sharing a
-group value will cancel each other.
+`cancel-in-progress` makes the newest push win.
+
+It is declared **twice on purpose** — once here in `review.yml`
+(`claude-review-…`) and once in the caller, `templates/wrapper.yml`
+(`ai-review-…`). That is not an oversight:
+
+- Whether a top-level `concurrency` block inside a *called* workflow governs the
+  run is **not stated anywhere in GitHub's documentation**. Community reports say
+  it works; the docs are silent. This guard is the single biggest quota saver in
+  the design, so relying solely on undocumented behaviour is a poor trade.
+- Declaring it in the caller, which is an ordinary workflow, is unambiguously
+  specified and guaranteed to work.
+- The two group names must **differ**, which is why one is `claude-review-…` and
+  the other `ai-review-…`. GitHub warns that a caller and callee sharing a group
+  value with `cancel-in-progress` will cancel each other.
+
+Guard 7 (missing credential) lives in a step rather than a job `if:`, because the
+`secrets` context is unavailable in `jobs.<job_id>.if` — see the wrapper's own
+comments.
 
 **Guard 6 does not bail out**, it narrows. A 5000-line PR still gets auth,
 payments, migrations, DB access, config, and dependency manifests reviewed, and
@@ -169,17 +186,48 @@ somewhere. It is dispatch-only and touches nothing in the reviewer path.
 
 ## Finding the tooling at the right version
 
-`review.yml` checks out its own repo to get `scripts/` and `prompts/`, resolving
-the revision from **`github.job_workflow_ref`**.
+`review.yml` checks out its own repo to get `scripts/` and `prompts/`. Which
+revision is **not inferable at runtime**, so it is passed as the `tooling_ref`
+input (default `v1`), alongside `tooling_repo` (default `jdfyras/claude-review`).
 
-This must not be `github.workflow_ref`. Inside a reusable workflow the github
-context is the *caller's*, so `workflow_ref` is the project repo's wrapper file —
-using it would check the project repo out over itself and find no scripts.
-`job_workflow_ref` is documented as "for jobs using a reusable workflow, the ref
-path to the reusable workflow", which is what we need.
+That looks like avoidable duplication — the caller already names the ref in
+`uses:` — so it is worth recording why inference does not work, because the
+obvious attempts both fail:
 
-The upshot: a caller pinned to `@v1` runs the prompts from `v1`, never from
-`main`, and no owner or repo name is hardcoded in `review.yml`.
+- **`github.workflow_ref`** is the *caller's* wrapper file. The github context
+  inside a called workflow belongs to the caller, so using this would check the
+  project repo out over itself and find no scripts.
+- **`github.job_workflow_ref`** looks exactly right — GitHub documents
+  `job_workflow_ref` as "for jobs using a reusable workflow, the ref path to the
+  reusable workflow". **But that is an OIDC token *claim*, not a `github`
+  context property.** In a workflow expression it resolves to an empty string.
+
+The second one was the original implementation, and it made **every review fail
+at the first step** until a run log was actually read:
+
+```
+env:
+  JOB_WORKFLOW_REF:
+##[error]github.job_workflow_ref is empty.
+```
+
+The runner prints the value we want (`Uses: owner/claude-review/...@refs/tags/v1
+(112aa2ef...)`) but does not expose it to expressions. Hence the explicit input.
+
+Two consequences worth knowing:
+
+- A caller that pins `uses: ...@v1` gets `tooling_ref: v1` by default, so ref and
+  tooling stay in sync with no boilerplate. A caller pinning something else must
+  set `tooling_ref` to match, or it will run one version's workflow against
+  another version's prompts.
+- `self-review.yml` passes `tooling_ref: ${{ github.event.pull_request.head.sha }}`
+  so dogfooding exercises the prompts *in the pull request*, not the released
+  ones. Without that override it would silently test the wrong thing.
+
+**Lesson recorded deliberately:** "documented as an OIDC claim" is not the same
+as "available in the `github` context", and `actionlint` catches exactly this
+class of mistake (`property "job_workflow_ref" is not defined in object type…`).
+It is now part of the verification pass.
 
 ## The repo is public
 

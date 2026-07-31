@@ -21,5 +21,10 @@ jobs:
       pull-requests: write
       id-token: write
     uses: ./.github/workflows/review.yml
+    with:
+      # Load scripts and prompts from THIS pull request's head, not from the
+      # released `v1` tag. Without this the workflow logic under review would
+      # run against the previously-shipped prompts, which is not dogfooding.
+      tooling_ref: ${{ github.event.pull_request.head.sha }}
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

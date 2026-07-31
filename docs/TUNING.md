@@ -3,7 +3,31 @@
 How to make the reviewer quieter, sharper, or cheaper — and how to know whether
 a change helped rather than just feeling like it did.
 
-## The one rule
+## Before anything else: lint the workflows
+
+Any change to a `.yml` under `.github/workflows/` or to `templates/wrapper.yml`
+must pass [actionlint](https://github.com/rhysd/actionlint):
+
+```bash
+actionlint .github/workflows/*.yml
+```
+
+This is not optional politeness. A context that does not exist — a
+`github.job_workflow_ref` that is only an OIDC claim, a `secrets` reference in a
+job-level `if:` — is accepted by every YAML parser and by GitHub's own editor,
+then fails at runtime on every single review. actionlint catches both instantly;
+`python3 -c "import yaml"` catches neither.
+
+To lint the wrapper template, copy it into a real workflows path first —
+actionlint keys some checks off the file location:
+
+```bash
+mkdir -p /tmp/lint/.github/workflows
+cp templates/wrapper.yml /tmp/lint/.github/workflows/ai-review.yml
+(cd /tmp/lint && actionlint .github/workflows/ai-review.yml)
+```
+
+## The one rule for prompts
 
 **Change the prompt, run the eval, compare.** A prompt edit that feels like an
 improvement very often trades a false positive for a missed defect. The harness

@@ -40,6 +40,19 @@ on:
         description: "Fail the check run when a blocking finding exists."
         type: boolean
         default: false
+      tooling_ref:
+        description: >-
+          Git ref of claude-review to load scripts and prompts from. Must match
+          the ref the caller pinned in `uses:`. Callers on the standard `@v1`
+          wrapper can leave this alone; the default already says v1.
+        type: string
+        default: v1
+      tooling_repo:
+        description: >-
+          Repository holding the scripts and prompts. Only override this if you
+          have forked claude-review.
+        type: string
+        default: jdfyras/claude-review
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude Code OAuth token from `claude setup-token`."
@@ -86,52 +99,77 @@ jobs:
       pull-requests: write
       id-token: write
     steps:
-      # Work out which claude-review revision to use, so the scripts and prompts
-      # come from exactly the ref the caller pinned. A caller on @v1 can never
-      # accidentally run prompts from main, and no owner or repo name is
-      # hardcoded anywhere in this file.
+      # GUARD 7 — no usable credential.
       #
-      # It must be `job_workflow_ref`, NOT `workflow_ref`. Inside a reusable
-      # workflow the github context belongs to the CALLER, so `workflow_ref` is
-      # the caller's wrapper file — using it would check out the project repo
-      # over itself and no scripts would be found. `job_workflow_ref` is
-      # documented as "for jobs using a reusable workflow, the ref path to the
-      # reusable workflow", which is this file.
+      # If CLAUDE_CODE_OAUTH_TOKEN is not set on the calling repository it
+      # arrives here as an empty string. Catch that up front and stop cheaply
+      # with an explanation, rather than checking out two repositories and then
+      # failing deep inside the action with an opaque auth error.
       #
-      # Shape: owner/claude-review/.github/workflows/review.yml@refs/tags/v1
-      - name: Resolve claude-review revision
-        id: self
+      # This check cannot live in the caller's `jobs.<id>.if`: the `secrets`
+      # context is not available there (only github, inputs, needs and vars),
+      # so `if: secrets.FOO != ''` is a workflow validation error. It has to be
+      # a step, where `secrets` IS reachable through `env:`.
+      - name: Guard — reviewer credential present
+        id: credential
         env:
-          JOB_WORKFLOW_REF: ${{ github.job_workflow_ref }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_REF:-}" ]; then
-            echo "::error title=Cannot resolve claude-review::github.job_workflow_ref is empty. This workflow must be invoked via 'uses:', not run directly."
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            printf 'present=false\n' >> "$GITHUB_OUTPUT"
+            {
+              echo "### AI review skipped — no credential"
+              echo
+              echo "\`CLAUDE_CODE_OAUTH_TOKEN\` is not set on this repository, so the"
+              echo "reviewer cannot authenticate and no review was attempted."
+              echo
+              echo "Fix: \`gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo $GITHUB_REPOSITORY\`"
+              echo "See step 3 of claude-review's docs/SETUP.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=AI review skipped::CLAUDE_CODE_OAUTH_TOKEN is not set on this repository"
+          else
+            printf 'present=true\n' >> "$GITHUB_OUTPUT"
+            echo "Credential present."
+          fi
+
+      # Which claude-review revision supplies the scripts and prompts.
+      #
+      # This CANNOT be derived from the context at runtime. `github.workflow_ref`
+      # is the caller's wrapper file, not this file — the github context inside a
+      # called workflow belongs to the caller. And `job_workflow_ref`, despite
+      # existing as an OIDC token claim, is NOT exposed as a github context
+      # property: it resolves to an empty string in expressions. That mistake
+      # made every review fail at this exact step until it was caught, so the ref
+      # is now an explicit input instead of something inferred.
+      - name: Resolve claude-review revision
+        id: self
+        if: steps.credential.outputs.present == 'true'
+        env:
+          TOOLING_REPO: ${{ inputs.tooling_repo }}
+          TOOLING_REF: ${{ inputs.tooling_ref }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TOOLING_REPO:-}" ] || [ -z "${TOOLING_REF:-}" ]; then
+            echo "::error title=Cannot resolve claude-review::tooling_repo and tooling_ref must both be non-empty."
             exit 1
           fi
-          case "$JOB_WORKFLOW_REF" in
-            */.github/workflows/*@*) : ;;
-            *)
-              echo "::error title=Unexpected job_workflow_ref::Could not parse '${JOB_WORKFLOW_REF}'."
-              exit 1
-              ;;
-          esac
-          repo="${JOB_WORKFLOW_REF%%/.github/*}"
-          ref="${JOB_WORKFLOW_REF##*@}"
-          printf 'repo=%s\n' "$repo" >> "$GITHUB_OUTPUT"
-          printf 'ref=%s\n'  "$ref"  >> "$GITHUB_OUTPUT"
-          printf 'Using tooling from %s at %s\n' "$repo" "$ref"
+          printf 'repo=%s\n' "$TOOLING_REPO" >> "$GITHUB_OUTPUT"
+          printf 'ref=%s\n'  "$TOOLING_REF"  >> "$GITHUB_OUTPUT"
+          printf 'Using tooling from %s at %s\n' "$TOOLING_REPO" "$TOOLING_REF"
 
       # Full history is required so `git merge-base` finds the real fork point.
       # Forks are already excluded above, so the base commit is guaranteed to be
       # present in this repository.
       - name: Check out the pull request
+        if: steps.credential.outputs.present == 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Check out claude-review
+        if: steps.credential.outputs.present == 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ steps.self.outputs.repo }}
@@ -140,6 +178,7 @@ jobs:
 
       - name: Collect workflow inputs
         id: overrides
+        if: steps.credential.outputs.present == 'true'
         env:
           IN_PROFILE: ${{ inputs.profile }}
           IN_MODEL: ${{ inputs.model }}
@@ -186,6 +225,7 @@ jobs:
 
       - name: Resolve configuration
         id: config
+        if: steps.credential.outputs.present == 'true'
         run: |
           set -euo pipefail
           .claude-review-tooling/scripts/resolve-config.sh \
@@ -198,6 +238,7 @@ jobs:
       # GUARD 6 — oversized diff degrades to triage mode over the riskiest files.
       - name: Compute reviewed file set
         id: scope
+        if: steps.credential.outputs.present == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}

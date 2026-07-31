@@ -7,22 +7,49 @@
 # only ever downgrade the caller's token, never elevate it — so if these are
 # omitted the review job silently loses the ability to comment.
 #
-# The secret is passed explicitly by name rather than via `secrets: inherit`,
-# so this job only ever receives CLAUDE_CODE_OAUTH_TOKEN — not every other
-# secret this repo happens to have. That secret has to exist on this repo (or
-# its org); secrets never travel between repositories. jdfyras is a personal
-# account, and GitHub has no user-level Actions secrets, so for repos owned by
-# jdfyras the secret must be set per repo.
+# Secrets are never shared between repositories by GitHub. This workflow passes
+# CLAUDE_CODE_OAUTH_TOKEN explicitly by name — not `secrets: inherit` — so the
+# called workflow receives that one token and nothing else this repo holds. The
+# secret must exist on THIS repository (or on the organization that owns it):
+#   gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo OWNER/THIS-REPO
 #
 # Everything else is configured centrally. To override a default for this repo
 # only, add a .claude-review.yml at the repo root — see the template alongside
 # this file.
+#
+# Two things are deliberately NOT here, so please don't "fix" them:
+#
+#   * No `labeled`/`unlabeled` triggers. GitHub cannot filter a trigger by label
+#     name, so those types fire on EVERY label change. An unrelated label like
+#     "bug" would pass the skip-ai-review check and spend a full review's worth
+#     of Claude quota for nothing. The label is honoured on the next push, which
+#     is soon enough and free in the meantime.
+#   * No `if:` guarding on the secret. The `secrets` context is NOT available in
+#     `jobs.<job_id>.if` — only github, inputs, needs and vars are — so
+#     `if: secrets.FOO != ''` is a workflow validation error, not a guard.
+#     review.yml checks the credential in a step, where `secrets` IS reachable,
+#     and stops cheaply with an explanation if it is missing.
 
 name: AI Code Review
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+
+# Cancel a review that a newer push has already made obsolete. review.yml
+# declares its own concurrency group too, but whether a top-level `concurrency`
+# block inside a *called* workflow governs the run is not actually stated
+# anywhere in GitHub's documentation — and this is the single biggest quota
+# saver in the design, so it is not something to leave to undocumented
+# behaviour. Declaring it here, in an ordinary caller workflow, is guaranteed
+# to work.
+#
+# The group name must DIFFER from the one review.yml uses. GitHub warns that a
+# caller and a called workflow sharing a group value with cancel-in-progress
+# will cancel each other.
+concurrency:
+  group: ai-review-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   review:
