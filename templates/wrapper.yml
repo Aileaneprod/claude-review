@@ -36,7 +36,18 @@
 # only, add a .claude-review.yml at the repo root — see the template alongside
 # this file.
 #
-# Two things are deliberately NOT here, so please don't "fix" them:
+# Three things are deliberately as they are, so please don't "fix" them:
+#
+#   * `@v1` is a MOVING TAG, on purpose, and is not pinned to a commit SHA.
+#     Reviewers raise this often, so: the whole point of the central
+#     reusable-workflow design is that one retag propagates a prompt or workflow
+#     fix to every consuming repo at once. SHA-pinning would mean hand-editing
+#     the pin in every wrapper on every change, which defeats the architecture —
+#     and that path is not hypothetical, it is how a bug that broke every review
+#     was shipped to all repos in one step. The untrusted input is fork pull
+#     requests, and review.yml excludes those with a dedicated guard rather than
+#     using pull_request_target. claude-review is controlled by the same person
+#     as this repo, so a retag is not a third-party supply-chain event.
 #
 #   * No `labeled`/`unlabeled` triggers. GitHub cannot filter a trigger by label
 #     name, so those types fire on EVERY label change. An unrelated label like
