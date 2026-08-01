@@ -443,7 +443,13 @@ jobs:
 
           # Read and comment only. No Edit, no Write, no unrestricted Bash — the
           # reviewer must never be able to modify the code it is reviewing.
-          tools='mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Read,Grep,Glob'
+          # `gh repo view` is read-only repository metadata (default branch,
+          # visibility, topics). It is here because its absence caused a real
+          # false positive: the reviewer could not determine the default branch,
+          # assumed it, and posted a confident 🔴 Blocking finding built on the
+          # wrong assumption. Give it the means to check, and the grounding
+          # rules can hold it to checking.
+          tools='mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh repo view:*),Read,Grep,Glob'
 
           {
             printf 'value<<CLAUDE_ARGS_EOF\n'

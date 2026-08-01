@@ -255,6 +255,26 @@ trap worth remembering.
 
 `fail_on_blocking` is opt-in and off by default.
 
+## The eval harness cannot catch environment-assumption errors
+
+Worth stating plainly, because it was learned the hard way. Every fixture in
+`eval/` is a self-contained snippet: the reviewer's job is to reason about code
+it can read. That measures code reasoning, and it measures the anti-false-positive
+rules — but only for claims whose evidence is *in the file*.
+
+It cannot measure the other failure mode: a finding whose premise is a fact
+about the **repository**, guessed rather than checked. The reviewer's first real
+inline finding in production was exactly this — a confident 🔴 Blocking claim
+that the default branch was `main` (it was `develop`), built on a comment in the
+file describing the general case. The code reasoning on top of that premise was
+sound. The premise was invented, so the finding was worthless.
+
+Root cause was a tooling gap as much as a prompt gap: `gh repo view` was not in
+`--allowedTools`, so the reviewer *could not* check the default branch even if
+it had wanted to. It is now, and `base.md` rule 8 requires checking rather than
+assuming. But the harness still will not catch a regression here, because
+fixtures have no repository around them. Watch for it in real reviews instead.
+
 ## Known limitations
 
 - **`exclude_paths` replaces, it does not merge.** A repo that sets it must
