@@ -371,11 +371,44 @@ Two consequences:
 
 - **On a repo with a `develop` → `main` split, merging into `develop` is not
   enough.** Reviews stay silent until the identical file is on `main` too.
-  `install-wrapper.sh` now warns when you pass a `--base` that is not the
-  default branch, and prints the second command to run.
+  `install-wrapper.sh` warns when you pass a `--base` that is not the default
+  branch, and prints both ways out.
 - **The pull request that adds the workflow never gets reviewed by it** — its
   copy differs from the default branch by definition. That is expected, not a
   bug. Reviews start on the *next* pull request.
+
+### If you cannot touch the default branch
+
+Some repos develop only on `develop` and treat `main` as a release branch that
+must not be disturbed. For those, skip the App:
+
+```bash
+./scripts/install-wrapper.sh OWNER/REPO --base develop --no-github-app --confirm
+```
+
+That sets `use_github_app: false` in the wrapper, which makes `review.yml` hand
+the action the workflow's own `GITHUB_TOKEN`. The action returns on that token
+*before* it requests an OIDC token or calls the app-token exchange — and the
+default-branch check lives on the far side of that exchange, so it never runs.
+
+What you give up:
+
+| | GitHub App (default) | `--no-github-app` |
+|---|---|---|
+| Comment author | `claude[bot]` | `github-actions[bot]` |
+| Wrapper must be on default branch | yes | **no** |
+| Claude GitHub App must be installed | yes | **no** |
+| Token lifetime | per-run App token | per-run `GITHUB_TOKEN` |
+
+Both of the caveats Anthropic documents for this path are irrelevant here: the
+`use_sticky_comment` feature is unused (`post-review.sh` owns the summary
+comment), and the "commits by Claude don't retrigger CI" caveat cannot apply
+because the reviewer has no write tools and never commits.
+
+Do **not** substitute a personal access token for this. A PAT does not rotate
+between runs, and the action's own security guidance warns it could be partially
+recovered through prompt injection. The per-run `GITHUB_TOKEN` has neither
+problem.
 
 ### Don't forget
 

@@ -6,11 +6,15 @@
 #   install-wrapper.sh OWNER/REPO [--confirm] [--path PATH] [--branch NAME]
 #                                 [--base BRANCH] [--template FILE]
 #
-#   --confirm        Actually write. WITHOUT THIS THE SCRIPT ONLY PRINTS A DIFF.
-#   --path PATH      Where to install. Default .github/workflows/ai-review.yml
-#   --branch NAME    Branch to create. Default chore/add-ai-review
-#   --base BRANCH    Base branch. Default: the repo's default branch.
-#   --template FILE  Wrapper source. Default ../templates/wrapper.yml
+#   --confirm         Actually write. WITHOUT THIS THE SCRIPT ONLY PRINTS A DIFF.
+#   --path PATH       Where to install. Default .github/workflows/ai-review.yml
+#   --branch NAME     Branch to create. Default chore/add-ai-review
+#   --base BRANCH     Base branch. Default: the repo's default branch.
+#   --template FILE   Wrapper source. Default ../templates/wrapper.yml
+#   --no-github-app   Authenticate with the workflow's own GITHUB_TOKEN instead
+#                     of the Claude GitHub App. Use this when the wrapper will
+#                     not live on the repository's default branch, since the App
+#                     refuses to run in that case.
 #
 # Idempotent: if the target already has an identical wrapper, this exits 0
 # without touching anything. If it has a *different* wrapper, the dry run shows
@@ -28,6 +32,7 @@ dest_path=".github/workflows/ai-review.yml"
 branch="chore/add-ai-review"
 base_branch=""
 template="${script_dir}/../templates/wrapper.yml"
+use_github_app=1
 
 die() {
   printf 'install-wrapper: %s\n' "$1" >&2
@@ -41,6 +46,7 @@ while [ "$#" -gt 0 ]; do
     --branch)   [ "$#" -ge 2 ] || die "--branch requires a value";   branch="$2";      shift 2 ;;
     --base)     [ "$#" -ge 2 ] || die "--base requires a value";     base_branch="$2"; shift 2 ;;
     --template) [ "$#" -ge 2 ] || die "--template requires a value"; template="$2";    shift 2 ;;
+    --no-github-app) use_github_app=0; shift ;;
     -h|--help)  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)         die "unknown option: $1" ;;
     *)
@@ -76,6 +82,34 @@ work_dir="$(mktemp -d)"
 cleanup() { rm -rf "$work_dir"; }
 trap cleanup EXIT
 
+# Materialise the effective wrapper up front, applying --no-github-app if asked,
+# so the comparison, the dry-run diff and the upload all see identical bytes.
+# That matters more than usual here: the Claude GitHub App compares this file
+# byte-for-byte against the default branch, so "close enough" is not a thing.
+effective_template="${work_dir}/wrapper.yml"
+cp "$template" "$effective_template"
+if [ "$use_github_app" -eq 0 ]; then
+  python3 - "$effective_template" <<'PY'
+import sys
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    content = handle.read()
+
+needle = "      use_github_app: true\n"
+if needle not in content:
+    sys.stderr.write(
+        "install-wrapper: template has no 'use_github_app: true' line to flip\n"
+    )
+    sys.exit(1)
+
+with open(path, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(content.replace(needle, "      use_github_app: false\n"))
+PY
+  printf 'install-wrapper: using the workflow GITHUB_TOKEN instead of the Claude GitHub App\n' >&2
+fi
+template="$effective_template"
+
 # --- resolve the base branch -------------------------------------------------
 if ! gh api "repos/${target}" >"${work_dir}/repo.json" 2>"${work_dir}/repo.err"; then
   sed 's/^/install-wrapper:   /' "${work_dir}/repo.err" >&2 || true
@@ -92,15 +126,18 @@ fi
 # rewriting the workflow to exfiltrate the token. Installing onto some other
 # branch therefore produces a workflow that is present, valid, and permanently
 # silent, which is a miserable thing to debug. Say so up front.
-if [ "$base_branch" != "$default_branch" ]; then
+if [ "$base_branch" != "$default_branch" ] && [ "$use_github_app" -eq 1 ]; then
   printf 'install-wrapper: WARNING: installing onto "%s", but the default branch is "%s".\n' \
     "$base_branch" "$default_branch" >&2
   printf 'install-wrapper:   The Claude GitHub App only runs a workflow that matches the\n' >&2
   printf 'install-wrapper:   copy on the default branch, so reviews will NOT run until this\n' >&2
   printf 'install-wrapper:   file also lands on "%s" with identical content.\n' "$default_branch" >&2
-  printf 'install-wrapper:   Install onto "%s" as well:\n' "$default_branch" >&2
+  printf 'install-wrapper:   Either also install onto "%s":\n' "$default_branch" >&2
   printf 'install-wrapper:     %s %s --base %s --confirm\n' \
     "$(basename "${BASH_SOURCE[0]}")" "$target" "$default_branch" >&2
+  printf 'install-wrapper:   or skip the App entirely and keep "%s" untouched:\n' "$default_branch" >&2
+  printf 'install-wrapper:     %s %s --base %s --no-github-app --confirm\n' \
+    "$(basename "${BASH_SOURCE[0]}")" "$target" "$base_branch" >&2
 fi
 
 # --- compare against what is already there -----------------------------------

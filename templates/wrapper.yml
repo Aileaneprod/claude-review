@@ -3,16 +3,24 @@
 # Copy this file into a project repo as .github/workflows/ai-review.yml.
 # Nothing needs editing — it already points at jdfyras/claude-review.
 #
-# IT MUST LAND ON THE REPOSITORY'S DEFAULT BRANCH. The Claude GitHub App
-# refuses to run when the workflow file differs from the copy on the default
-# branch — that is what stops a pull request from rewriting the workflow to
-# steal the token. Consequences:
-#   * On a repo using a develop/main split, merging this into `develop` alone
-#     is not enough; reviews stay silent until it is on the default branch too.
+# BY DEFAULT THIS MUST LAND ON THE REPOSITORY'S DEFAULT BRANCH. The Claude
+# GitHub App refuses to run when the workflow file differs from the copy on the
+# default branch — that is what stops a pull request from rewriting the workflow
+# to steal the token. Consequences:
+#   * On a repo using a develop/main split, merging this into `develop` alone is
+#     not enough; reviews stay silent until it is on the default branch too.
 #   * The pull request that ADDS this file never gets reviewed by it. That is
 #     expected. Reviews begin on the next pull request.
 # The run log says: "Workflow validation failed. The workflow file must exist
 # and have identical content to the version on the repository's default branch."
+#
+# If you cannot put this on the default branch — a repo that develops only on
+# `develop`, for instance — set `use_github_app: false` below (or install with
+# `--no-github-app`). That makes the reviewer authenticate with this workflow's
+# own GITHUB_TOKEN instead of the App, which skips that check entirely. The only
+# visible difference is that comments come from github-actions[bot] rather than
+# claude[bot]. It also means the Claude GitHub App does not need to be installed
+# on the repository at all.
 #
 # The permissions block MUST live here, in the caller. A reusable workflow can
 # only ever downgrade the caller's token, never elevate it — so if these are
@@ -70,5 +78,9 @@ jobs:
       pull-requests: write
       id-token: write
     uses: jdfyras/claude-review/.github/workflows/review.yml@v1
+    with:
+      # false = authenticate with this workflow's GITHUB_TOKEN instead of the
+      # Claude GitHub App. Required when this file is not on the default branch.
+      use_github_app: true
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

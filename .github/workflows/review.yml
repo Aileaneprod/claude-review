@@ -53,6 +53,14 @@ on:
           have forked claude-review.
         type: string
         default: jdfyras/claude-review
+      use_github_app:
+        description: >-
+          Authenticate as the Claude GitHub App (default). Set false to use the
+          workflow's own GITHUB_TOKEN instead, which is required when the
+          wrapper does not live on the repository's DEFAULT branch — the App
+          refuses to run otherwise. See docs/SETUP.md.
+        type: boolean
+        default: true
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude Code OAuth token from `claude setup-token`."
@@ -455,6 +463,21 @@ jobs:
       # prompt-driven agent mode entirely. use_sticky_comment matches the first
       # comment by any bot whose login contains "claude" — ignoring HTML markers —
       # and would clobber the summary comment this workflow manages itself.
+      #
+      # github_token: when `use_github_app` is false we hand the action this
+      # workflow's own token. The action's setupGitHubToken() returns on that
+      # before requesting an OIDC token or calling the app-token exchange, which
+      # is where the server-side check `workflow_not_found_on_default_branch`
+      # lives. That check compares this workflow file against the copy on the
+      # repository's DEFAULT branch, so a repo that develops on `develop` and
+      # never merges to `main` can otherwise never be reviewed at all.
+      #
+      # The two documented costs of that path do not apply here: `use_sticky_comment`
+      # is unused (post-review.sh owns the summary comment), and the "Claude's
+      # commits don't retrigger CI" caveat is moot because the reviewer has no
+      # write tools and never commits. Comments post as github-actions[bot]
+      # rather than claude[bot]. An empty string is falsy to the action, so the
+      # default keeps the GitHub App path exactly as before.
       - name: Review
         id: claude
         if: steps.scope.outputs.has_files == 'true'
@@ -462,6 +485,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ inputs.use_github_app && '' || github.token }}
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: ${{ steps.args.outputs.value }}
 
