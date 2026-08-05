@@ -74,7 +74,7 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not installed"
 if grep -q '\[GITHUB_OWNER\]' "$template"; then
   die "template still contains [GITHUB_OWNER].
   Replace it first, e.g.:
-    grep -rl '\[GITHUB_OWNER\]' . | xargs sed -i 's/\[GITHUB_OWNER\]/jdfyras/g'
+    grep -rl '\[GITHUB_OWNER\]' . | xargs sed -i 's/\[GITHUB_OWNER\]/Aileaneprod/g'
   See docs/SETUP.md."
 fi
 

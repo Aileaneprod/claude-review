@@ -1,7 +1,7 @@
 # AI code review, delegated to the central claude-review repo.
 #
 # Copy this file into a project repo as .github/workflows/ai-review.yml.
-# Nothing needs editing — it already points at jdfyras/claude-review.
+# Nothing needs editing — it already points at Aileaneprod/claude-review.
 #
 # BY DEFAULT THIS MUST LAND ON THE REPOSITORY'S DEFAULT BRANCH. The Claude
 # GitHub App refuses to run when the workflow file differs from the copy on the
@@ -90,7 +90,7 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
-    uses: jdfyras/claude-review/.github/workflows/review.yml@v1
+    uses: Aileaneprod/claude-review/.github/workflows/review.yml@v1
     with:
       # true  — authenticate as the Claude GitHub App. Requires this file to be
       #         present, byte-identical, on the repository's DEFAULT branch.

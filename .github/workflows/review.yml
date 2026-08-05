@@ -52,7 +52,7 @@ on:
           Repository holding the scripts and prompts. Only override this if you
           have forked claude-review.
         type: string
-        default: jdfyras/claude-review
+        default: Aileaneprod/claude-review
       use_github_app:
         description: >-
           Authenticate as the Claude GitHub App (default). Set false to use the
@@ -171,14 +171,14 @@ jobs:
       # present in this repository.
       - name: Check out the pull request
         if: steps.credential.outputs.present == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Check out claude-review
         if: steps.credential.outputs.present == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ steps.self.outputs.repo }}
           ref: ${{ steps.self.outputs.ref }}

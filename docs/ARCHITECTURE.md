@@ -188,7 +188,7 @@ somewhere. It is dispatch-only and touches nothing in the reviewer path.
 
 `review.yml` checks out its own repo to get `scripts/` and `prompts/`. Which
 revision is **not inferable at runtime**, so it is passed as the `tooling_ref`
-input (default `v1`), alongside `tooling_repo` (default `jdfyras/claude-review`).
+input (default `v1`), alongside `tooling_repo` (default `Aileaneprod/claude-review`).
 
 That looks like avoidable duplication — the caller already names the ref in
 `uses:` — so it is worth recording why inference does not work, because the

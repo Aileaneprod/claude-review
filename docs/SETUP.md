@@ -9,20 +9,22 @@ Run everything from a **Git Bash** terminal (or WSL/macOS/Linux) inside the
 work identically in PowerShell too, except the one script in step 8 that uses a
 bash `while` loop.
 
-**Current status of this specific setup**, checked just now:
+This repo lives at **`Aileaneprod/claude-review`** and is **public**, so any
+repository — inside the org or not — can call it.
+
+**Current status**, for the Aileaneprod team:
 
 | Item | Status |
 |---|---|
-| Repo pushed to GitHub | ✅ done — `https://github.com/jdfyras/claude-review` is public |
-| Subscription token minted | ❌ not yet — step 2 |
-| Token stored as a secret | ❌ not yet — step 3 |
-| Claude GitHub App installed | ❌ not yet — step 4 |
-| `v1` tag created | ❌ not yet — step 5 |
-| A project repo wired up | ❌ not yet — step 7 |
+| Repo published | ✅ `https://github.com/Aileaneprod/claude-review`, public |
+| `v1` tag | ✅ exists and moves with each release |
+| Claude GitHub App | ✅ installed on the accounts in use |
+| Org-wide secret | ⬜ **recommended — see step 3a**, one command covers every org repo |
+| Project repos wired up | 2 live (`affaire_a_suivre--frontend`, `--backend`) |
 
-So you can skip straight to **step 2**. Step 1 is included below anyway, so
-this document is complete on its own and you can hand it to someone else
-starting from zero.
+**If you are a team member wiring up a new repo**, you only need steps 3 and 7.
+Steps 1, 2, 4 and 5 are one-time setup that is already done — they remain
+documented so this file stands alone.
 
 Total time: about 15 minutes for steps 1–6, then 2 minutes per project repo
 after that (steps 7–8).
@@ -56,7 +58,7 @@ https://cli.github.com/.
 ```bash
 gh auth status
 ```
-Expect a line starting `✓ Logged in to github.com account jdfyras`.
+Expect a line starting `✓ Logged in to github.com account <your-username>`.
 If not logged in:
 ```bash
 gh auth login
@@ -95,18 +97,18 @@ steps below: get that token, store it, and turn the recipe on.
 
 ## Step 1 — Push `claude-review` to GitHub, publicly
 
-**Already done for this setup** — verified: `jdfyras/claude-review` exists and
+**Already done for this setup** — verified: `Aileaneprod/claude-review` exists and
 is public. Skip to step 2.
 
 *(Included for completeness / for redoing this from scratch elsewhere.)*
 
 ```bash
-gh repo create jdfyras/claude-review --public --source=. --remote=origin --push
+gh repo create Aileaneprod/claude-review --public --source=. --remote=origin --push
 ```
 
 If the repo already exists on GitHub but isn't linked locally:
 ```bash
-git remote add origin git@github.com:jdfyras/claude-review.git
+git remote add origin git@github.com:Aileaneprod/claude-review.git
 git push -u origin main
 ```
 
@@ -123,7 +125,7 @@ and keep it that way going forward.
 
 **Check it worked:**
 ```bash
-gh repo view jdfyras/claude-review --json visibility,url
+gh repo view Aileaneprod/claude-review --json visibility,url
 ```
 Expect: `"visibility":"PUBLIC"` and the URL.
 
@@ -165,17 +167,31 @@ injects into workflow runs as an environment variable. It's never visible in
 logs, never visible to people browsing the repo, and different from ordinary
 repo settings.
 
-**Important wrinkle for your account specifically:** `jdfyras` is a *personal*
-GitHub account, and personal accounts have **no "org-wide" secret** — that
-feature only exists for organizations. So for any repo owned by `jdfyras`
-directly, you set the secret on *that repo*, one at a time.
+**Do this once for the whole organisation.** Organisations support a single
+secret shared by every repo in them, which is the main practical benefit of
+`claude-review` living in `Aileaneprod` rather than a personal account — nobody
+has to repeat this per repo.
 
-### 3a. For a repo owned by `jdfyras`
-
-Replace `some-project` with the actual repo name:
+### 3a. Org-wide (recommended — needs org owner/admin)
 
 ```bash
-gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo jdfyras/some-project
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --org Aileaneprod --visibility all
+```
+
+`--visibility all` lets every repo in the org use it. Use `--visibility selected`
+with `--repos a,b,c` to restrict it instead.
+
+Whose token should this be? Any single Claude Pro/Max/Team subscription works,
+and **every review in every org repo draws on that one subscription's quota**.
+For a team, a Team-plan account is the sane owner; a personal Max token will
+throttle once several people are opening PRs at once.
+
+### 3b. A single repo (personal repos, or a client repo you have admin on)
+
+Personal accounts have no org-wide secret, so those are set per repo:
+
+```bash
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo OWNER/some-project
 ```
 
 Since no value is given on the command line, `gh` prompts you to enter it
@@ -184,25 +200,23 @@ masked, so nothing visibly appears as you paste, which is normal.
 
 **Check it worked:**
 ```bash
-gh secret list --repo jdfyras/some-project
+gh secret list --repo OWNER/some-project
 ```
 Expect a line: `CLAUDE_CODE_OAUTH_TOKEN   Updated <date>`.
 
-### 3b. For repos inside your two organizations
+### 3c. Your other organisation
 
-You *do* belong to two orgs, and organizations **do** support one secret shared
-across every repo in them:
+Same command, different org:
 
 ```bash
 gh secret set CLAUDE_CODE_OAUTH_TOKEN --org Gear-Five-5 --visibility all
-gh secret set CLAUDE_CODE_OAUTH_TOKEN --org Aileaneprod --visibility all
 ```
 
 Same prompt as above — paste the token, press Enter. `--visibility all` means
 every repo in that org can use it (use `--visibility selected` plus
 `--repos` if you want to restrict it to specific repos instead).
 
-### 3c. For a client's repo (they own it, you have admin access)
+### 3d. A client's repo (they own it, you have admin access)
 
 ```bash
 gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo CLIENT-ORG/their-repo
@@ -211,7 +225,7 @@ gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo CLIENT-ORG/their-repo
 You need admin (or at least "manage secrets") permission on that repo for this
 to succeed.
 
-### 3d. Which repos still need it?
+### 3e. Which repos still need it?
 
 Run this to scan every repo you personally own and flag the ones missing the
 secret (needs a bash shell — Git Bash, WSL, macOS/Linux terminal):
@@ -259,7 +273,7 @@ and confirm "Claude" is listed with the repos you selected.
 
 ## Step 5 — Tag `v1`
 
-Every project repo's wrapper file says `uses: jdfyras/claude-review/...@v1` —
+Every project repo's wrapper file says `uses: Aileaneprod/claude-review/...@v1` —
 it points at a *tag* called `v1`, not a branch. That tag has to exist before
 any wrapper can find it.
 
@@ -351,7 +365,7 @@ identical wrapper file, it exits immediately and changes nothing.
 
 Copy [`templates/wrapper.yml`](../templates/wrapper.yml) into the target repo
 at `.github/workflows/ai-review.yml`, commit, and push (or open a PR) yourself.
-The file already points at `jdfyras/claude-review@v1` — nothing to edit.
+The file already points at `Aileaneprod/claude-review@v1` — nothing to edit.
 
 ### It must land on the DEFAULT branch
 
