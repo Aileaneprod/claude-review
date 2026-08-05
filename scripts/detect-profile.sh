@@ -29,7 +29,14 @@ if [ ! -d "$root" ]; then
 fi
 
 # Directories that never contain first-party source and can be enormous.
-prune_dirs=(.git node_modules .venv venv site-packages dist build .next vendor)
+#
+# `.claude-review-tooling` is where review.yml checks this repo out inside the
+# target repo's workspace. Without pruning it, detection scans OUR files and
+# reports the reviewer's own stack instead of the project's — a Next.js app was
+# classified `node-typescript,n8n` because eval/fixtures contains an n8n
+# workflow export. Anything scanning from the workspace root must skip it.
+prune_dirs=(.git node_modules .venv venv site-packages dist build .next vendor
+            .claude-review-tooling)
 
 # grep -r across the repo, skipping the prune list. Returns 1 when nothing
 # matches, which is an ordinary outcome here rather than an error.

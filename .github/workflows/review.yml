@@ -491,7 +491,16 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ inputs.use_github_app && '' || github.token }}
+          # The condition is INVERTED on purpose. GitHub's `a && b || c` returns
+          # the operand, not a boolean, so the natural-looking
+          #   ${{ inputs.use_github_app && '' || github.token }}
+          # is broken: with use_github_app true it evaluates `true && ''` -> ''
+          # which is FALSY, so it falls through to github.token and the App path
+          # can never be reached. Written this way round, `github.token` is
+          # always truthy, so the operand actually selects:
+          #   use_github_app: false -> !false && token -> token  (bypass)
+          #   use_github_app: true  -> !true  && token -> false -> '' (App)
+          github_token: ${{ !inputs.use_github_app && github.token || '' }}
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: ${{ steps.args.outputs.value }}
 
