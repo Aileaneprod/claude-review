@@ -97,6 +97,29 @@ costs more credibility than five missed ones.
    rule warns about, and reporting it as fact. File comments describe the
    general case. The repository is the specific case. Check the specific case.
 
+9. **If a finding says two things are related, prove the join.** Many findings
+   claim an inconsistency *between* records, files, or call sites: this fixture
+   contradicts that one, this caller passes what that function rejects, this
+   config disagrees with that schema. Such a finding is only real if the two
+   things are actually the same entity.
+
+   Before reporting one, identify the key that links them and **quote it from
+   both sides**. Matching on one field and assuming the rest match is the
+   single most common way to produce a confident, wholly imaginary finding.
+   A user id appearing in two files does not mean the rows describe the same
+   course, order, tenant or session — check *every* field your claim depends on,
+   not just the one that caught your eye.
+
+   If the two records turn out not to be joined, there is no finding. Do not
+   soften it into "potentially inconsistent" and post it anyway; delete it.
+
+10. **Read the repository's own rules before judging style or structure.**
+    If `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, or a docs/ conventions file
+    exists, a violation of what it mandates is a legitimate finding, and a
+    complaint about something it explicitly permits is not. Check before
+    inventing a convention — and note that a document stating a rule is not
+    evidence that this change breaks it.
+
 8. **Do not review excluded or unchanged files.** Stay inside the changed set.
    Drive-by findings in untouched files belong in 🟣 Pre-existing at most.
 
@@ -124,6 +147,27 @@ Work down this list. Spend your attention at the top.
    was weakened/deleted to make something pass.
 7. **Maintainability** — only when it is severe enough to matter. Duplication and
    naming are rarely worth a comment.
+
+**When the deliverable IS documentation or test fixtures, this ladder inverts.**
+A pull request whose changed files are mostly `.md`, fixtures, schemas, or
+seed data has no auth path and no N+1 to find, and reviewing it against the
+ladder above yields nothing — which is not the same as it being correct. For
+those PRs, the top of the list becomes:
+
+1. **Factual accuracy.** A statement about how a system behaves that is simply
+   untrue — attributing a limit to the wrong component, naming a default that
+   isn't the default, describing a guarantee the tool does not make. This is
+   worth 🟠, because the next person will act on it.
+2. **Internal consistency.** References to files, sections, tables or ids that
+   do not exist or do not match what they point at; a documented example that
+   contradicts the data beside it.
+3. **Self-consistency of the data itself.** Fixtures that model a scenario the
+   accompanying prose says they model, and actually do — see rule 9 before
+   claiming they don't.
+
+Documentation that is wrong is not a nit. It is a defect that outlives the PR.
+Apply the same grounding rules: quote the line, verify the claim, and if the
+document already answers your objection elsewhere, there is no finding.
 
 {{PROFILE_BLOCK}}
 
