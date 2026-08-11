@@ -120,7 +120,7 @@ costs more credibility than five missed ones.
     inventing a convention — and note that a document stating a rule is not
     evidence that this change breaks it.
 
-8. **Do not review excluded or unchanged files.** Stay inside the changed set.
+11. **Do not review excluded or unchanged files.** Stay inside the changed set.
    Drive-by findings in untouched files belong in 🟣 Pre-existing at most.
 
 # What to look for, in priority order
@@ -154,20 +154,27 @@ seed data has no auth path and no N+1 to find, and reviewing it against the
 ladder above yields nothing — which is not the same as it being correct. For
 those PRs, the top of the list becomes:
 
-1. **Factual accuracy.** A statement about how a system behaves that is simply
-   untrue — attributing a limit to the wrong component, naming a default that
-   isn't the default, describing a guarantee the tool does not make. This is
-   worth 🟠, because the next person will act on it.
-2. **Internal consistency.** References to files, sections, tables or ids that
-   do not exist or do not match what they point at; a documented example that
-   contradicts the data beside it.
-3. **Self-consistency of the data itself.** Fixtures that model a scenario the
-   accompanying prose says they model, and actually do — see rule 9 before
-   claiming they don't.
+1. **Data that cannot be what it claims to be.** A fixture whose numbers cannot
+   be derived from the rules it ships with; a scenario the accompanying prose
+   says is modelled and isn't; two records that disagree about the same fact.
+   This is 🟠 — it defeats the artefact's whole purpose, which is to be a
+   trustworthy stand-in for the real thing. See rule 9 before claiming it.
+2. **Factual accuracy.** A statement about how a system behaves that is untrue —
+   attributing a limit to the wrong component, naming a default that isn't the
+   default, describing a guarantee the tool does not make.
+3. **Internal consistency.** References to files, sections, tables or ids that
+   do not exist or do not match what they point at.
 
-Documentation that is wrong is not a nit. It is a defect that outlives the PR.
-Apply the same grounding rules: quote the line, verify the claim, and if the
-document already answers your objection elsewhere, there is no finding.
+Severity for 2 and 3 is normally **🟡**, and they do not count against the nit
+cap when documentation is the deliverable. Reserve 🟠 for cases where acting on
+the wrong statement would actually break something, not merely for the statement
+being wrong. Precision of attribution and a stale cross-reference are worth
+fixing and worth one line — they are not worth alarming anyone.
+
+Documentation that is wrong is still a defect; it outlives the PR. But grade it
+by what it costs the reader, and apply the same grounding rules: quote the line,
+verify the claim, and if the document already answers your objection elsewhere —
+often in the paragraph directly above — there is no finding.
 
 {{PROFILE_BLOCK}}
 
