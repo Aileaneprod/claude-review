@@ -191,7 +191,29 @@ learnings_block = "\n\n".join(learning_blocks) if learning_blocks else (
     "_(No learnings recorded yet. Apply the grounding rules above as written.)_"
 )
 
+# --- output language ---------------------------------------------------------
+# Only governs what the reviewer WRITES. It reads code and comments in any
+# language regardless. Empty means: match the repository.
+language = (config.get("language") or "").strip()
+if language:
+    _lang_body = (
+        "Write every finding and the summary in **%s**, whatever language the "
+        "code and its comments are in. Keep identifiers, file paths and quoted "
+        "code exactly as they appear — translate your prose, never the evidence."
+        % language
+    )
+else:
+    _lang_body = (
+        "Write in the language this repository uses. Judge it from the code "
+        "comments, the README and the pull request description, not from this "
+        "prompt — these instructions are in English, the project may not be. "
+        "If the team writes in French, review in French. Keep identifiers, file "
+        "paths and quoted code exactly as they appear."
+    )
+language_note = "# Language\n\n" + _lang_body
+
 replacements = {
+    "{{LANGUAGE_NOTE}}": language_note,
     "{{LEARNINGS}}": learnings_block,
     "{{REPO}}": repo,
     "{{PR_NUMBER}}": str(pr_number),

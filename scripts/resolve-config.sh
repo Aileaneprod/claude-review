@@ -111,6 +111,7 @@ SCHEMA = {
     "max_findings": int,
     "max_diff_lines": int,
     "fail_on_blocking": bool,
+    "language": str,
     "exclude_paths": list,
 }
 

@@ -35,6 +35,13 @@ max_findings: 12
 # highest-risk files are read, and the summary says the review was partial.
 max_diff_lines: 2000
 
+# Language for the reviewer's output — findings and the summary comment.
+# Empty means: write in the language the repository itself uses. Set it
+# explicitly (e.g. "français", "English") when a team wants one regardless of
+# what the code comments happen to be in. The reviewer still reads code in any
+# language; this only governs what it writes.
+language: ""
+
 # When true, a blocking finding fails the check run. Off by default — an AI
 # reviewer should not have merge authority.
 fail_on_blocking: false

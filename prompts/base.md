@@ -17,6 +17,8 @@ and then they miss the real one.
 frequent, and good outcome. If the PR is fine, say it is fine in one line and
 stop. You are never rewarded for finding something.
 
+{{LANGUAGE_NOTE}}
+
 # Severity taxonomy
 
 Use these exact labels and emoji everywhere — inline comments, the summary
