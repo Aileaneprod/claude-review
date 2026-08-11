@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+#
+# harvest-feedback.sh — record what actually happened to each review finding.
+#
+# Usage:
+#   harvest-feedback.sh --repo OWNER/REPO --pr N [--out DIR]
+#
+#   --repo OWNER/REPO  Repository whose pull request to harvest.
+#   --pr N             Pull request number.
+#   --out DIR          Where to write the ledger. Default: ../feedback
+#
+# Writes feedback/<owner>/<repo>/<pr>.json: one record per review thread, with
+# the finding, the author's reply verbatim, whether the thread was resolved,
+# whether the code underneath changed, and — critically — the commit the finding
+# was made against.
+#
+# WHY THE COMMIT MATTERS. A finding that was correct is indistinguishable from
+# one that was wrong once the author has fixed it: the contradiction you would
+# look for is exactly what the fix removed. Judging a past finding against the
+# branch tip therefore scores correct findings as false positives. This script
+# records `original_commit_id` so that never happens. That is not a theoretical
+# concern — it is how a true positive on Aileaneprod/korbyx#13 was mis-scored.
+#
+# This script only COLLECTS. It never edits prompts. Turning records into
+# lessons is propose-learnings.sh, whose output a human reviews and merges.
+#
+# Requires: gh (authenticated), python3.
+
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+repo=""
+pr_number=""
+out_dir="${script_dir}/../feedback"
+
+die() {
+  printf 'harvest-feedback: %s\n' "$1" >&2
+  exit 1
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --repo) [ "$#" -ge 2 ] || die "--repo requires a value"; repo="$2";      shift 2 ;;
+    --pr)   [ "$#" -ge 2 ] || die "--pr requires a value";   pr_number="$2"; shift 2 ;;
+    --out)  [ "$#" -ge 2 ] || die "--out requires a value";  out_dir="$2";   shift 2 ;;
+    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument: $1" ;;
+  esac
+done
+
+[ -n "$repo" ]      || die "--repo is required"
+[ -n "$pr_number" ] || die "--pr is required"
+command -v gh >/dev/null 2>&1      || die "gh is not installed"
+command -v python3 >/dev/null 2>&1 || die "python3 is not installed"
+
+owner="${repo%%/*}"
+name="${repo##*/}"
+[ -n "$owner" ] && [ -n "$name" ] || die "--repo must be OWNER/REPO"
+
+work_dir="$(mktemp -d)"
+cleanup() { rm -rf "$work_dir"; }
+trap cleanup EXIT
+
+# Threads carry the conversation and the resolution state; only GraphQL exposes
+# isResolved and isOutdated.
+#
+# shellcheck disable=SC2016
+# The query is deliberately single-quoted: $owner, $name and $pr are GraphQL
+# variables bound by -F, and must reach the server unexpanded. Letting the shell
+# interpolate them would send an empty, invalid query.
+gh api graphql -F owner="$owner" -F name="$name" -F pr="$pr_number" -f query='
+query($owner:String!, $name:String!, $pr:Int!) {
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$pr) {
+      title
+      state
+      reviewThreads(first:100) {
+        nodes {
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first:50) {
+            nodes { databaseId author { login } body createdAt }
+          }
+        }
+      }
+    }
+  }
+}' >"${work_dir}/threads.json" 2>"${work_dir}/threads.err" \
+  || { sed 's/^/harvest-feedback:   /' "${work_dir}/threads.err" >&2; die "GraphQL query failed"; }
+
+# REST carries original_commit_id — the SHA the comment was anchored to, which
+# GraphQL does not expose on review threads.
+gh api "repos/${repo}/pulls/${pr_number}/comments" --paginate --slurp \
+  >"${work_dir}/rest.json" 2>/dev/null || printf '[]' >"${work_dir}/rest.json"
+
+mkdir -p "${out_dir}/${owner}/${name}"
+
+python3 - "${work_dir}/threads.json" "${work_dir}/rest.json" \
+          "${out_dir}/${owner}/${name}/${pr_number}.json" "$repo" "$pr_number" <<'PY'
+import json
+import sys
+
+threads_path, rest_path, out_path, repo, pr = sys.argv[1:6]
+
+with open(threads_path, encoding="utf-8") as fh:
+    doc = json.load(fh)
+pr_node = doc["data"]["repository"]["pullRequest"]
+
+with open(rest_path, encoding="utf-8") as fh:
+    pages = json.load(fh)
+rest = []
+for page in pages if isinstance(pages, list) else []:
+    rest.extend(page if isinstance(page, list) else [page])
+commit_by_id = {c.get("id"): c.get("original_commit_id") for c in rest}
+
+BOTS = ("claude", "coderabbitai", "copilot", "sourcery-ai", "github-actions")
+
+
+def is_bot(login):
+    low = (login or "").lower()
+    return any(low.startswith(b) for b in BOTS) or low.endswith("[bot]")
+
+
+# The author's own words are the label. Guess a verdict for convenience, but
+# always keep the raw text: the guess is a hint for a human, never a decision.
+ACCEPT = ("corrigé", "corrige", "fixed", "corrected", "appliqué", "applique",
+          "le constat est exact", "le constat est juste", "good catch", "done")
+REJECT = ("écarté", "ecarte", "rejected", "declined", "not a", "faux positif",
+          "false positive", "invalide", "no change")
+PARTIAL = ("à moitié", "a moitie", "partiel", "partially", "en partie")
+
+
+def guess(text):
+    low = (text or "").lower()
+    if any(k in low for k in PARTIAL):
+        return "partial"
+    if any(k in low for k in REJECT):
+        return "rejected"
+    if any(k in low for k in ACCEPT):
+        return "accepted"
+    return "unknown"
+
+
+records = []
+for thread in pr_node["reviewThreads"]["nodes"]:
+    comments = thread["comments"]["nodes"]
+    if not comments:
+        continue
+    first = comments[0]
+    author = (first.get("author") or {}).get("login") or "unknown"
+    if not is_bot(author):
+        continue  # human-initiated threads are not our findings to score
+
+    human_replies = [
+        c for c in comments[1:]
+        if not is_bot((c.get("author") or {}).get("login"))
+    ]
+    verdict_text = human_replies[0]["body"] if human_replies else ""
+
+    records.append({
+        "reviewer": author,
+        "path": thread.get("path"),
+        "line": thread.get("line"),
+        # The SHA the finding was anchored to. Re-check findings against THIS,
+        # never against the branch tip.
+        "reviewed_commit": commit_by_id.get(first.get("databaseId")),
+        "finding": first.get("body", ""),
+        "finding_at": first.get("createdAt"),
+        "human_reply": verdict_text,
+        "human_reply_at": human_replies[0]["createdAt"] if human_replies else None,
+        "verdict_guess": guess(verdict_text) if verdict_text else "no_reply",
+        "resolved": thread.get("isResolved"),
+        "outdated": thread.get("isOutdated"),
+    })
+
+out = {
+    "repo": repo,
+    "pr": int(pr),
+    "title": pr_node.get("title"),
+    "state": pr_node.get("state"),
+    "findings": records,
+}
+with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
+    json.dump(out, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+
+by_reviewer = {}
+for r in records:
+    slot = by_reviewer.setdefault(r["reviewer"], {})
+    slot[r["verdict_guess"]] = slot.get(r["verdict_guess"], 0) + 1
+
+sys.stderr.write("harvest-feedback: %s#%s -> %s\n" % (repo, pr, out_path))
+for reviewer, counts in sorted(by_reviewer.items()):
+    detail = ", ".join("%s=%d" % kv for kv in sorted(counts.items()))
+    sys.stderr.write("  %-22s %s\n" % (reviewer, detail))
+PY

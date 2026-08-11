@@ -16,7 +16,14 @@
 #                          `profile` key, or auto-detect when that is `auto`.
 #   --triage               Mark the review as partial (oversized diff).
 #   --prior-findings FILE  Markdown list of findings already posted on this PR.
+#   --repo-root DIR        Root of the repo under review, used to pick up its
+#                          own .claude-review/learnings.md. Default: current dir.
 #   --out FILE             Where to write the assembled prompt.
+#
+# Memory: the reviewer's learnings come from two files, both optional —
+# prompts/learnings.md here (lessons that generalise across repos) and
+# .claude-review/learnings.md in the repo under review (its own conventions).
+# Both are curated by humans; see docs/TUNING.md.
 #
 # The PR title and body are deliberately NOT interpolated here. They are
 # attacker-controlled on any pull request; the reviewer fetches them itself with
@@ -34,6 +41,7 @@ pr_number=""
 changed_files=""
 profiles=""
 prior_findings=""
+repo_root="."
 out_file=""
 triage=0
 
@@ -50,6 +58,7 @@ while [ "$#" -gt 0 ]; do
     --changed-files)  [ "$#" -ge 2 ] || die "--changed-files requires a value";  changed_files="$2";  shift 2 ;;
     --profiles)       [ "$#" -ge 2 ] || die "--profiles requires a value";       profiles="$2";       shift 2 ;;
     --prior-findings) [ "$#" -ge 2 ] || die "--prior-findings requires a value"; prior_findings="$2"; shift 2 ;;
+    --repo-root)      [ "$#" -ge 2 ] || die "--repo-root requires a value";      repo_root="$2";      shift 2 ;;
     --out)            [ "$#" -ge 2 ] || die "--out requires a value";            out_file="$2";       shift 2 ;;
     --triage)         triage=1; shift ;;
     -h|--help)        sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -86,13 +95,16 @@ python3 - \
   "$changed_files" \
   "$triage" \
   "$prior_findings" \
-  "$out_file" <<'PY'
+  "$out_file" \
+  "${prompts_dir}/learnings.md" \
+  "${repo_root}/.claude-review/learnings.md" <<'PY'
 import json
 import os
 import sys
 
 (base_path, profiles_dir, profile_csv, config_path, repo, pr_number,
- changed_path, triage_flag, prior_path, out_path) = sys.argv[1:11]
+ changed_path, triage_flag, prior_path, out_path,
+ global_learnings_path, repo_learnings_path) = sys.argv[1:13]
 
 with open(base_path, encoding="utf-8") as handle:
     template = handle.read()
@@ -151,7 +163,36 @@ if prior_path and os.path.isfile(prior_path):
 if not prior_text:
     prior_text = "_(none — this is the first review of this pull request.)_"
 
+# --- learnings (the reviewer's memory) ---------------------------------------
+# Two optional sources: lessons that generalise across repositories, and lessons
+# belonging to the repository under review. Both are human-curated; an absent or
+# empty file simply contributes nothing.
+def read_learnings(path, label):
+    if not path or not os.path.isfile(path):
+        return ""
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read().strip()
+    if not text:
+        return ""
+    # Everything before the first lesson heading is guidance for maintainers,
+    # not for the reviewer, so drop it rather than spend prompt on it.
+    marker = text.find("\n## ")
+    if marker != -1:
+        text = text[marker + 1:]
+    return "### %s\n\n%s" % (label, text.strip())
+
+
+learning_blocks = [
+    read_learnings(global_learnings_path, "Lessons that apply everywhere"),
+    read_learnings(repo_learnings_path, "Lessons specific to this repository"),
+]
+learning_blocks = [b for b in learning_blocks if b]
+learnings_block = "\n\n".join(learning_blocks) if learning_blocks else (
+    "_(No learnings recorded yet. Apply the grounding rules above as written.)_"
+)
+
 replacements = {
+    "{{LEARNINGS}}": learnings_block,
     "{{REPO}}": repo,
     "{{PR_NUMBER}}": str(pr_number),
     "{{MAX_FINDINGS}}": str(config.get("max_findings", 12)),
@@ -174,7 +215,9 @@ with open(out_path, "w", encoding="utf-8", newline="\n") as handle:
     handle.write(template)
 
 sys.stderr.write(
-    "build-prompt: wrote %s (%d bytes, profiles: %s, %d files in scope)\n"
-    % (out_path, len(template.encode("utf-8")), ",".join(names), len(files))
+    "build-prompt: wrote %s (%d bytes, profiles: %s, %d files in scope, "
+    "learnings: %d source(s))\n"
+    % (out_path, len(template.encode("utf-8")), ",".join(names), len(files),
+       len(learning_blocks))
 )
 PY

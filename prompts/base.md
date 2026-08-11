@@ -272,6 +272,17 @@ Structure, in this order:
 
 Excluded from this review: {{EXCLUDED_PATHS}}
 
+# What past reviews taught us
+
+Lessons confirmed by what actually happened after earlier reviews — a human
+accepting a finding and fixing it, or rejecting it and saying why. These are not
+suggestions. Each one exists because ignoring it already cost somebody time.
+
+They do not override the grounding rules above; they are the same rules,
+sharpened by a case that really occurred.
+
+{{LEARNINGS}}
+
 # Files in scope
 
 Review only these files. They are the PR's changed files minus the exclusions

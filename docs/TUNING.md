@@ -27,6 +27,70 @@ cp templates/wrapper.yml /tmp/lint/.github/workflows/ai-review.yml
 (cd /tmp/lint && actionlint .github/workflows/ai-review.yml)
 ```
 
+## Memory: how the reviewer learns
+
+The reviewer has a memory, and it is a plain markdown file injected into every
+prompt. There is no fine-tuning and no hidden state — if the reviewer knows
+something, it is because a human wrote it down here.
+
+Two files, both optional:
+
+| file | scope |
+|---|---|
+| `prompts/learnings.md` (this repo) | lessons that generalise across repositories |
+| `.claude-review/learnings.md` (target repo) | that repo's own conventions |
+
+### The loop
+
+```bash
+./scripts/harvest-feedback.sh --repo OWNER/REPO --pr 13
+./scripts/propose-learnings.sh --reviewer all
+```
+
+`harvest-feedback.sh` records what actually happened to every finding — the
+author's reply verbatim, whether the thread was resolved, whether the code
+underneath changed, and the commit the finding was anchored to. It writes
+`feedback/<owner>/<repo>/<pr>.json` and nothing else; it never touches prompts.
+
+`propose-learnings.sh` reads the ledger and prints a scoreboard, a draft lesson
+for every finding the author rejected, and a list of findings a competing
+reviewer got right that we never raised. **You** write the final wording and
+open a PR. Nothing is merged automatically.
+
+### Why it is human-gated
+
+A wrong lesson does not spoil one review. It spoils every review in every
+repository until somebody notices. This project has already produced a
+confident, well-argued, entirely incorrect diagnosis that reached the prompt —
+so the gate is not ceremony.
+
+### Judge a past finding against the commit it was made on
+
+The single most important rule in this loop, and the reason `reviewed_commit` is
+in the ledger. Once an author fixes a finding, the evidence for it is gone: the
+contradiction you would look for is exactly what the fix removed. Re-checking
+against the branch tip therefore scores **correct** findings as false positives.
+
+That is not hypothetical — it happened here, on `Aileaneprod/korbyx#13`, and led
+to a true positive being reported as a failure and prompt rules being written on
+the strength of it.
+
+### The author is already labelling your findings
+
+You do not need to build a labelling pipeline. On a healthy PR the author
+replies to each finding with a verdict in plain words — *"Corrigé en 74083ff, et
+le constat est juste"*, *"Écarté"*, *"Appliqué à moitié"*. `verdict_guess`
+classifies those heuristically for the scoreboard, but `human_reply` always
+keeps the raw text, because the guess is a hint for a human and never a
+decision.
+
+### Keeping memory from becoming bloat
+
+Every line is read on every review, so it costs quota and competes for attention
+with the diff. Delete lessons that have stopped earning their place. A lesson
+that only ever applied to one repository belongs in that repository's file, not
+the global one.
+
 ## The one rule for prompts
 
 **Change the prompt, run the eval, compare.** A prompt edit that feels like an

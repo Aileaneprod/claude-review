@@ -20,7 +20,7 @@ repository — inside the org or not — can call it.
 | `v1` tag | ✅ exists and moves with each release |
 | Claude GitHub App | ✅ installed on the accounts in use |
 | Org-wide secret | ⬜ **recommended — see step 3a**, one command covers every org repo |
-| Project repos wired up | 2 live (`affaire_a_suivre--frontend`, `--backend`) |
+| Project repos wired up | |
 
 **If you are a team member wiring up a new repo**, you only need steps 3 and 7.
 Steps 1, 2, 4 and 5 are one-time setup that is already done — they remain

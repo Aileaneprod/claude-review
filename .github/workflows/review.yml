@@ -413,6 +413,7 @@ jobs:
             --pr "$PR_NUMBER"
             --changed-files "$RUNNER_TEMP/reviewed-files.txt"
             --profiles "$PROFILES"
+            --repo-root .
             --out "$RUNNER_TEMP/prompt.md"
           )
           if [ "$TRIAGE" = "true" ]; then
