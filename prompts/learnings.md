@@ -98,15 +98,16 @@ must be read for instances, not only for the rule.
 
 **Evidence:** Aileaneprod/korbyx#84. A Luhn-valid generator with prefix `810000`
 in a scenario whose README said every identifier was invented. A human queried
-the public registry: *"SIREN qui existent : 11 sur 12"*, eight of them
-*"entrepreneur individuel donc personne physique"* — personal data. We reviewed
-that commit, `55dd646`, and raised nothing. Fixed with an explicit
-`SYNTHETIC_SIRENS` list. Aileaneprod/korbyx#16: the file forbidding client names
-contained one three times; we reviewed the same commit, `72e3d65`, posted two
-other findings, and missed it. The check that works is ours on
-Aileaneprod/korbyx#46 — `DOM&VIE` in a schema comment, *"sans être déclaré
-fictif nulle part dans le dépôt"*, tied by the commit message to a measurement
-on the client's production: *"Finding valide, et entièrement de mon fait."*
+the registry: *"SIREN qui existent : 11 sur 12"*, eight of them
+*"entrepreneur individuel donc personne physique"*. We reviewed that commit,
+`55dd646`, and raised nothing. Aileaneprod/korbyx#16: the file forbidding client
+names contained one, three times; we reviewed `72e3d65`, posted two
+other findings, and missed it — a file that states the rule reads as compliant.
+Contrast the one we got right, Aileaneprod/korbyx#46: `DOM&VIE` was declared
+fictional nowhere, and its commit message tied it to a measurement on the
+client's production. That is the discriminating move: not whether the text
+claims invention, but whether anything independent establishes provenance.
+*"Finding valide, et entièrement de mon fait."*
 
 ---
 

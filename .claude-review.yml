@@ -1,0 +1,19 @@
+# claude-review's own review settings. This repo is reviewed by the workflow it
+# ships, through .github/workflows/self-review.yml.
+#
+# Having this file at all is the point: until it existed, the only repository
+# never exercising claude-review's config surface was claude-review.
+
+# English, explicitly. Without this the reviewer is told to judge the language
+# from the repository, and the signals here disagree — the README, the docs and
+# every prompt are English, while pull request descriptions are often French.
+# Run 5 of PR #1 read the PR body and wrote its whole summary in French on an
+# English repository. That is the prompt behaving exactly as written; it is also
+# the thing `language` exists to settle, so settle it.
+language: "English"
+
+# Deliberately NOT set here: max_turns, max_findings, max_diff_lines, profile.
+# The shipped defaults are what every consuming repo gets, so this repository
+# should feel them rather than opt out of them. When a review here runs out of
+# turns, that is information about the default, not a local misconfiguration —
+# it is how the 20 -> 40 change was measured in the first place.
