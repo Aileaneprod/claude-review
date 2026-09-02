@@ -25,7 +25,23 @@ profile: auto
 model: ""
 
 # Maximum agentic turns for a single review. The main lever on cost per review.
-max_turns: 20
+#
+# 40, not 20, and the difference is measured rather than guessed. A review that
+# runs out of turns costs the same as one that finishes and delivers nothing:
+# the action reports `error_max_turns` and the workflow posts "review
+# unavailable". Two independent repositories hit it at 20:
+#
+#   * Aileaneprod/korbyx, four reviews on one PR: two died at 20 turns for
+#     $0.86 and $1.03 with nothing posted. That repo raised max_turns to 40 in
+#     its own .claude-review.yml and has not hit the ceiling since.
+#   * This repository's own first self-review (PR #1): `error_max_turns` at 21
+#     turns, $0.74, nothing posted.
+#
+# A turn is mostly one file read, and a real review reads the changed files plus
+# the conventions around them — AGENTS.md, the ADRs, the config the change
+# touches — before it can conclude anything. 20 does not cover that. Lower this
+# if quota gets tight, knowing exactly what it buys and what it risks.
+max_turns: 40
 
 # Hard cap on inline comments per review. Beyond this the reviewer keeps the
 # highest-severity findings and says how many it dropped.

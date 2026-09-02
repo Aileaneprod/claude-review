@@ -125,39 +125,12 @@ that commit, `0618b01`, and did not raise it.
 
 ---
 
-## A guard proved by a test that the guard does not apply to is not proved
+## Two lessons live in the postgres profile, not here
 
-When a change adds an access control — row-level security, a permission check,
-a tenant scope — check which principal the tests run as. A superuser, an admin
-role or an owner connection bypasses the control, so a green test under it
-proves the test runs, not that the guard holds. Then read every call site the
-change touched as if it were the only one: a value that is correct where a
-substitution started is not necessarily the one in scope where it ended. Not a
-finding if the test explicitly switches to a role the control applies to.
-
-**Evidence:** Aileaneprod/korbyx#82, the PR that introduced RLS. A repository
-was scoped to the primary organisation while its helper ingested under another.
-The author: *"C'est vert aujourd'hui uniquement parce que le propriétaire est
-superutilisateur et contourne les policies. Autrement dit, exactement le mode de
-défaillance que cette PR existe pour supprimer, planté dans son propre test."*
-We reviewed that commit, `355db08`, and raised nothing on it.
-
----
-
-## A foreign key proves the row exists, not that it is the right kind
-
-When a table extends a polymorphic root — a `business_object` carrying an
-`object_type`, a `node` carrying a `kind` — a foreign key on
-`(id, organization_id)` lets an extension of type A attach to a root declared
-type B. Look for the invariant that binds the extension to its discriminator:
-a composite key that includes the type column, or a check constraint, plus the
-negative test that inserts under a root of the wrong type. Not a finding if
-either already exists. If the root already lacked the invariant before the PR,
-say so — the finding is still real, and the fix belongs to a change that covers
-every extension.
-
-**Evidence:** Aileaneprod/korbyx#46. The author reproduced it with three inserts
-— *"Une `business_unit` vit donc bien sous une racine déclarée `legal_entity`.
-Le finding est réel."* — showed it was pre-existing on all three extensions, and
-fixed it in Aileaneprod/korbyx#54. We reviewed the same commit, `4852891`, and
-posted a different 🔴 on the same file.
+Aileaneprod/korbyx#82 (a tenant guard whose test ran as a superuser, so it
+passed without the policy holding) and Aileaneprod/korbyx#46 (a foreign key
+proving a root row exists but not that it is the right kind) both produced
+rules. Both are stack checks rather than memory: they apply to any PostgreSQL
+repository and to no other kind. They are in `prompts/profiles/postgres.md`,
+where they cost nothing on the reviews they do not concern. This note stays so
+the evidence is not lost — delete it once the profile has proved itself.

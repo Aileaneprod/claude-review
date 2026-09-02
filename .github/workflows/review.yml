@@ -23,7 +23,14 @@ on:
       max_turns:
         description: "Agentic turn budget for a single review."
         type: number
-        default: 20
+        # MUST match config/defaults.yml. GitHub substitutes an input's default
+        # whenever the caller omits it, so this value is always present in the
+        # overrides JSON — and overrides beat config/defaults.yml. For every
+        # input with a non-empty default, the number here is the one that
+        # actually applies and the one in defaults.yml is never consulted.
+        # Measured: 20 killed reviews on two repositories with `error_max_turns`
+        # at full cost and no output. See config/defaults.yml for the evidence.
+        default: 40
       max_findings:
         description: "Hard cap on inline comments per review."
         type: number
