@@ -123,6 +123,19 @@ else:
 
 # Which tools did it reach for and not have? Names only, never arguments: the
 # arguments carry repository content, and these logs are public on a public repo.
+#
+# The name and the failure live on DIFFERENT blocks and must be joined by id.
+# A `tool_use` block carries {id, name, input}; the `tool_result` that answers it
+# carries {tool_use_id, content, is_error} and no name at all. Reading `name` off
+# the result — the obvious thing, and the first thing written here — yields
+# "unknown" for every denial, which silently defeats the whole point of the
+# feature while still printing a plausible-looking line.
+tool_names = {}
+for message in messages:
+    for block in content_blocks(message):
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            tool_names[block.get("id")] = block.get("name") or "unknown"
+
 denied = {}
 for message in messages:
     for block in content_blocks(message):
@@ -130,7 +143,11 @@ for message in messages:
             continue
         text = json.dumps(block.get("content", ""))[:400].lower()
         if block.get("is_error") or "permission" in text or "not allowed" in text:
-            name = block.get("name") or block.get("tool_name") or "unknown"
+            name = tool_names.get(block.get("tool_use_id"))
+            if not name:
+                # Some records inline the name on the result; prefer the joined
+                # value, fall back rather than losing the denial entirely.
+                name = block.get("name") or block.get("tool_name") or "unknown"
             denied[name] = denied.get(name, 0) + 1
 if denied:
     print("  denied tools       %s"
