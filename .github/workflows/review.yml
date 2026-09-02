@@ -36,6 +36,12 @@ on:
         description: "Newline-separated globs to exclude. Replaces the defaults."
         type: string
         default: ""
+      language:
+        description: >-
+          Language the reviewer WRITES in — findings and summary. Empty means
+          match the repository. It reads code in any language regardless.
+        type: string
+        default: ""
       fail_on_blocking:
         description: "Fail the check run when a blocking finding exists."
         type: boolean
@@ -194,6 +200,7 @@ jobs:
           IN_MAX_FINDINGS: ${{ inputs.max_findings }}
           IN_MAX_DIFF_LINES: ${{ inputs.max_diff_lines }}
           IN_EXCLUDE_PATHS: ${{ inputs.exclude_paths }}
+          IN_LANGUAGE: ${{ inputs.language }}
           IN_FAIL_ON_BLOCKING: ${{ inputs.fail_on_blocking }}
         run: |
           set -euo pipefail
@@ -208,6 +215,8 @@ jobs:
               out["profile"] = os.environ["IN_PROFILE"]
           if os.environ.get("IN_MODEL"):
               out["model"] = os.environ["IN_MODEL"]
+          if os.environ.get("IN_LANGUAGE"):
+              out["language"] = os.environ["IN_LANGUAGE"]
           for key, name in (
               ("IN_MAX_TURNS", "max_turns"),
               ("IN_MAX_FINDINGS", "max_findings"),
@@ -489,6 +498,14 @@ jobs:
         id: claude
         if: steps.scope.outputs.has_files == 'true'
         continue-on-error: true
+        # STEP-level, not job-level, on purpose. A step timeout yields
+        # `outcome: failure`, so the "review unavailable" notice below still
+        # posts and the author learns the review did not happen. A job timeout
+        # would cancel every later step and the PR would hear nothing.
+        # Measured on 200 runs: median 168 s, p90 300 s; three runs on
+        # 2026-08-28 hung for ~2h55 with no timeout to stop them. 40 turns at
+        # ~20 s each is ~15 min at worst, so 30 leaves headroom.
+        timeout-minutes: 30
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
