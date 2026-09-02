@@ -93,6 +93,7 @@ fi
 
 python3 - "$defaults_file" "$repo_config" "$overrides_file" <<'PY'
 import json
+import re
 import sys
 
 # --- The accepted YAML subset ------------------------------------------------
@@ -265,6 +266,26 @@ def validate(data, path):
             data[key] = ""
         elif expected is str and not isinstance(value, str):
             data[key] = str(value)
+
+    # `language` is interpolated into an INSTRUCTIONAL section of the prompt
+    # ("Write every finding and the summary in **%s**"), and .claude-review.yml
+    # is read from the head checkout of the pull request under review. Without a
+    # constraint, any branch author could write a sentence there and have it
+    # arrive as instruction rather than data — the one place in this pipeline
+    # where repo-controlled text becomes prompt text. Everything else the
+    # reviewer reads arrives as tool output, which base.md rule 7 covers.
+    #
+    # A language name is a short noun. Anything else is refused loudly, in the
+    # same spirit as the parser above: fail with a file:line rather than
+    # silently review under an attacker's instructions.
+    language = data.get("language") or ""
+    if language and not re.fullmatch(r"[^\W\d_][\w \-'()./]{0,39}", language, re.UNICODE):
+        sys.stderr.write(
+            "resolve-config: %s: key 'language' must be a language name — a "
+            "letter followed by up to 39 letters, digits, spaces or - ' ( ) . / "
+            "characters. Got %r.\n" % (path, language)
+        )
+        sys.exit(1)
     return data
 
 
