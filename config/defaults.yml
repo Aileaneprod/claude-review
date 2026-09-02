@@ -16,7 +16,8 @@
 # pipeline dependent on nothing beyond stock python3. See docs/ARCHITECTURE.md.
 
 # Which prompt profile to use. `auto` detects from repo contents.
-# Explicit values: python-fastapi, node-typescript, react-native, n8n, generic.
+# Explicit values: python-fastapi, node-typescript, react-native, n8n, postgres,
+# generic — or several, comma-separated (e.g. node-typescript,postgres).
 profile: auto
 
 # Model ID. Empty means "let claude-code-action choose its own default", which
