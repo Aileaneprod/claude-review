@@ -117,22 +117,35 @@ fi
 
 # --- postgres ----------------------------------------------------------------
 # Additive, like every other profile here: a Drizzle/TypeScript project gets
-# node-typescript AND postgres, because both checklists genuinely apply. The
-# migrations test looks for *.sql under any directory named migrations/ or
-# drizzle/, which is where every generator this has met puts them.
+# node-typescript AND postgres, because both checklists genuinely apply.
+#
+# The SQL test goes through find_migration_sql rather than a hand-rolled find,
+# so it honours the same prune_dirs as every other detector. Rebuilding the
+# exclusion list by hand missed vendor/, dist/, build/, .next/ and the virtualenv
+# directories, and a migrations/ folder vendored under any of them would have
+# flipped this on for a repo that does not own a schema at all.
+find_migration_sql() {
+  local args=("$root")
+  local dir first=1
+  args+=(-type d "(")
+  for dir in "${prune_dirs[@]}"; do
+    if [ "$first" -eq 1 ]; then
+      first=0
+    else
+      args+=(-o)
+    fi
+    args+=(-name "$dir")
+  done
+  args+=(")" -prune -o -type f -name '*.sql' -print)
+  find "${args[@]}" 2>/dev/null | grep -Ei '/(migrations|drizzle)/' | head -n 1
+}
+
 is_postgres=0
 if [ -n "$(find_named 'drizzle.config.ts')" ] || [ -n "$(find_named 'drizzle.config.js')" ] \
    || [ -n "$(find_named 'drizzle.config.mjs')" ] || [ -n "$(find_named 'schema.prisma')" ]; then
   is_postgres=1
-else
-  for dir in migrations drizzle; do
-    if [ -n "$(find "$root" -type d -name "$dir" -not -path '*/node_modules/*' \
-                -not -path '*/.git/*' -not -path '*/.claude-review-tooling/*' \
-                -exec find {} -name '*.sql' -print -quit \; 2>/dev/null | head -n 1)" ]; then
-      is_postgres=1
-      break
-    fi
-  done
+elif [ -n "$(find_migration_sql)" ]; then
+  is_postgres=1
 fi
 [ "$is_postgres" -eq 1 ] && profiles+=("postgres")
 
