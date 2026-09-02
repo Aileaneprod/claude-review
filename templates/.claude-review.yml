@@ -9,7 +9,11 @@
 # else fails the run with a file:line error rather than being misread.
 
 # Force a prompt profile instead of detecting one from repo contents.
-# One of: auto, python-fastapi, node-typescript, react-native, n8n, generic
+# One of: auto, python-fastapi, node-typescript, react-native, n8n, postgres,
+# generic — or several, comma-separated, when more than one genuinely applies:
+#   profile: node-typescript,postgres
+# `auto` detects and already combines them; name them explicitly only when
+# detection gets it wrong (a monorepo with no tsconfig.json at the root, say).
 profile: auto
 
 # Pin a model for this repo. Empty means "use the action's own default", which
@@ -17,8 +21,11 @@ profile: auto
 # the current ones from the Claude Code docs, do not copy one from memory.
 model: ""
 
-# Turn budget for a single review. Lower is cheaper and shallower.
-max_turns: 20
+# Turn budget for a single review. Lower is cheaper and shallower — but a review
+# that runs out of turns costs the same as one that finishes and delivers
+# nothing, so do not trim this without reading the evidence in
+# config/defaults.yml. 20 killed reviews on two separate repositories.
+max_turns: 40
 
 # Maximum inline comments per review. Lower this on repos where reviews feel
 # noisy; the reviewer keeps the highest-severity findings and reports the rest

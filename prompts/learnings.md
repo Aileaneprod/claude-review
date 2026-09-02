@@ -83,14 +83,18 @@ identifiers. A SIREN, SIRET, VAT number, IBAN or registration number shares its
 number space with reality, so "invented", a generator, or a passing checksum
 proves nothing — the value may still belong to a real company or a real person.
 When fixtures, scenarios or a memory file introduce such values, ask where they
-come from. `Grep` the working tree for the block the repository declares
-synthetic, and `gh pr diff` to see whether the value is even an added line.
-Taken from that declared block, or from an explicit list the PR says was checked
-against a registry: not a finding. New values from a generator with a realistic
-prefix, or values with no stated provenance: you cannot query a registry, so do
-not assert they are real — raise a 🟠 saying they are unverifiable as synthetic
-and name the block the repository already uses. And a file that states the
-no-real-identifier rule must be read for instances, not only for the rule.
+come from, and grade the answer by how it was established, not by how firmly it
+is asserted. **A prose claim that the values are invented proves nothing** —
+that sentence was present, and false, in the case below. What closes the
+question is provenance per value: an explicit list the change says was checked
+entry by entry against a registry, or values already on the base branch whose
+provenance was settled there (`gh pr diff` shows whether the value is even an
+added line; `Grep` the working tree for the list that holds it). Values from a
+generator, from a sequential or realistic prefix, or with no stated provenance
+stay open: you cannot query a registry, so do not assert they are real — raise
+a 🟠 that they are unverifiable as synthetic, and name the checked list the
+repository already uses. And a file that states the no-real-identifier rule
+must be read for instances, not only for the rule.
 
 **Evidence:** Aileaneprod/korbyx#84. A Luhn-valid generator with prefix `810000`
 in a scenario whose README said every identifier was invented. A human queried
@@ -123,14 +127,3 @@ reported success for an account that could not sign in. The author: *"je
 vérifiais deux des trois conditions et j'ai manqué la troisième."* We reviewed
 that commit, `0618b01`, and did not raise it.
 
----
-
-## Two lessons live in the postgres profile, not here
-
-Aileaneprod/korbyx#82 (a tenant guard whose test ran as a superuser, so it
-passed without the policy holding) and Aileaneprod/korbyx#46 (a foreign key
-proving a root row exists but not that it is the right kind) both produced
-rules. Both are stack checks rather than memory: they apply to any PostgreSQL
-repository and to no other kind. They are in `prompts/profiles/postgres.md`,
-where they cost nothing on the reviews they do not concern. This note stays so
-the evidence is not lost — delete it once the profile has proved itself.

@@ -36,10 +36,16 @@ apply with full force: open the migration, open the schema, open the test.
   table extends a polymorphic root — a `business_object` carrying an
   `object_type`, a `node` carrying a `kind` — a foreign key on
   `(id, tenant_id)` lets an extension of type A attach to a root declared type
-  B. Look for the invariant that binds the extension to its discriminator: a
-  unique/foreign key that includes the type column, or a check constraint, plus
-  a negative test inserting under a root of the wrong type. *Not a finding if*
-  either already exists.
+  B. The invariant that fixes it is a **composite foreign key including the
+  discriminator**: the extension carries its own `object_type` column, a `CHECK`
+  pins it to the one literal, and
+  `FOREIGN KEY (id, object_type) REFERENCES root(id, object_type)` makes the
+  root agree. Both halves are needed and neither substitutes for the other — a
+  `CHECK` cannot reference another table, so on its own it constrains the
+  extension's copy and says nothing about the root; the composite FK without the
+  `CHECK` admits any type as long as the two sides match. Look for both, plus a
+  negative test inserting under a root of the wrong type. *Not a finding if*
+  that pair is already present.
 - A composite foreign key whose target has no matching unique constraint does
   not compile as intended — check the target side, not just the referencing one.
 - Cross-tenant references: a foreign key on `id` alone lets a row point at
@@ -48,6 +54,13 @@ apply with full force: open the migration, open the schema, open the test.
   comment.
 
 ## Migrations
+
+The shipped `exclude_paths` default drops `**/migrations/**/*.sql`, so on a repo
+that has not replaced that list the raw SQL is **not in scope** and none of the
+checks below can fire. Apply them to whatever the repository actually puts in
+front of you — the schema declaration, a migration outside that path, or the
+SQL itself when the repo has opted it back in. Do not report on a file the
+"Files in scope" list does not name.
 
 - **Not idempotent, or not reviewable.** Prefer `IF NOT EXISTS` / `IF EXISTS`.
   A migration that already has them is correct — do not flag it.
