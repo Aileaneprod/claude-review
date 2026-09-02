@@ -17,6 +17,8 @@
 #   react-native     package.json mentioning react-native
 #   n8n              a *.n8n.json file, or a workflows/ directory holding JSON
 #                    with both "nodes" and "connections" keys
+#   postgres         a Drizzle config, a Prisma schema, or *.sql under a
+#                    migrations/ directory
 #   generic          fallback
 
 set -euo pipefail
@@ -112,6 +114,27 @@ $(find "${root}/workflows" -type f -name '*.json' 2>/dev/null)
 EOF
 fi
 [ "$is_n8n" -eq 1 ] && profiles+=("n8n")
+
+# --- postgres ----------------------------------------------------------------
+# Additive, like every other profile here: a Drizzle/TypeScript project gets
+# node-typescript AND postgres, because both checklists genuinely apply. The
+# migrations test looks for *.sql under any directory named migrations/ or
+# drizzle/, which is where every generator this has met puts them.
+is_postgres=0
+if [ -n "$(find_named 'drizzle.config.ts')" ] || [ -n "$(find_named 'drizzle.config.js')" ] \
+   || [ -n "$(find_named 'drizzle.config.mjs')" ] || [ -n "$(find_named 'schema.prisma')" ]; then
+  is_postgres=1
+else
+  for dir in migrations drizzle; do
+    if [ -n "$(find "$root" -type d -name "$dir" -not -path '*/node_modules/*' \
+                -not -path '*/.git/*' -not -path '*/.claude-review-tooling/*' \
+                -exec find {} -name '*.sql' -print -quit \; 2>/dev/null | head -n 1)" ]; then
+      is_postgres=1
+      break
+    fi
+  done
+fi
+[ "$is_postgres" -eq 1 ] && profiles+=("postgres")
 
 # --- fallback ----------------------------------------------------------------
 if [ "${#profiles[@]}" -eq 0 ]; then
