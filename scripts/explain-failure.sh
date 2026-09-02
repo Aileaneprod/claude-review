@@ -121,37 +121,38 @@ else:
               " always means the credential was rejected. Regenerate it with"
               " `claude setup-token` and re-set the repository secret.")
 
-# Which tools did it reach for and not have? Names only, never arguments: the
-# arguments carry repository content, and these logs are public on a public repo.
+# Which tools did it reach for and not have?
 #
-# The name and the failure live on DIFFERENT blocks and must be joined by id.
-# A `tool_use` block carries {id, name, input}; the `tool_result` that answers it
-# carries {tool_use_id, content, is_error} and no name at all. Reading `name` off
-# the result — the obvious thing, and the first thing written here — yields
-# "unknown" for every denial, which silently defeats the whole point of the
-# feature while still printing a plausible-looking line.
-tool_names = {}
-for message in messages:
-    for block in content_blocks(message):
-        if isinstance(block, dict) and block.get("type") == "tool_use":
-            tool_names[block.get("id")] = block.get("name") or "unknown"
-
+# This reads `permission_denials` off the result record, which the CLI itself
+# documents as "the authoritative record" of denials. Two earlier versions of
+# this tried to infer it from the message stream instead and both were wrong:
+# reading `name` off a `tool_result` block always yields nothing (the name lives
+# on the `tool_use`, joined by `tool_use_id`), and treating `is_error` as a
+# denial counts every ordinary tool failure — a Read of a missing file, a grep
+# that matches nothing — as a permissions problem. Each printed a confident line
+# that was noise. The field is right here; use it.
+#
+# Names only, never the tool input: inputs carry repository content and these
+# logs are public on a public repository.
 denied = {}
-for message in messages:
-    for block in content_blocks(message):
-        if not isinstance(block, dict):
+for result in results:
+    entries = result.get("permission_denials")
+    if not isinstance(entries, list):
+        continue
+    for entry in entries:
+        if not isinstance(entry, dict):
             continue
-        text = json.dumps(block.get("content", ""))[:400].lower()
-        if block.get("is_error") or "permission" in text or "not allowed" in text:
-            name = tool_names.get(block.get("tool_use_id"))
-            if not name:
-                # Some records inline the name on the result; prefer the joined
-                # value, fall back rather than losing the denial entirely.
-                name = block.get("name") or block.get("tool_name") or "unknown"
-            denied[name] = denied.get(name, 0) + 1
+        name = entry.get("tool_name") or "unknown"
+        denied[name] = denied.get(name, 0) + 1
+
 if denied:
     print("  denied tools       %s"
           % ", ".join("%s x%d" % pair for pair in sorted(denied.items())))
+elif results and results[-1].get("permission_denials_count"):
+    # The count is present but the list is not — say so rather than staying
+    # silent, so the gap is visible instead of looking like zero denials.
+    print("  denied tools       %s denial(s), tool names not recorded in this run"
+          % results[-1]["permission_denials_count"])
 
 # Inline comments post the moment they are made, so a run that dies late has
 # usually already put real findings on the diff.
