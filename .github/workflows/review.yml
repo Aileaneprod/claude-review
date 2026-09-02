@@ -560,59 +560,35 @@ jobs:
 
           # The action's own failure message is often just
           # "result is_error:true", which says nothing actionable. The execution
-          # file carries the real result record, so surface it — an auth failure
-          # and a mid-review crash look identical without it.
-          if [ -n "${EXECUTION_FILE:-}" ] && [ -f "$EXECUTION_FILE" ]; then
-            echo "--- diagnostic: last result record from the execution file ---"
-            python3 - "$EXECUTION_FILE" <<'PY' || echo "(could not parse the execution file)"
-          import json
-          import sys
+          # file carries the real result record — and, just as usefully, which
+          # tools the reviewer was denied and how many findings it had already
+          # posted before it stopped. explain-failure.sh does that reading; it
+          # never fails the job.
+          echo "--- diagnostic ---"
+          .claude-review-tooling/scripts/explain-failure.sh             --execution-file "${EXECUTION_FILE:-}"             --count-out "$RUNNER_TEMP/posted-count" || true
 
-          try:
-              messages = json.load(open(sys.argv[1], encoding="utf-8"))
-          except (OSError, ValueError) as exc:
-              print("unreadable: %s" % exc)
-              raise SystemExit(0)
+          posted=0
+          if [ -f "$RUNNER_TEMP/posted-count" ]; then
+            posted="$(cat "$RUNNER_TEMP/posted-count")"
+          fi
+          case "$posted" in ''|*[!0-9]*) posted=0 ;; esac
 
-          results = [m for m in messages
-                     if isinstance(m, dict) and m.get("type") == "result"]
-          if not results:
-              print("no result record — the run died before finishing")
-              raise SystemExit(0)
-
-          last = results[-1]
-          for key in ("subtype", "is_error", "num_turns", "duration_ms",
-                      "total_cost_usd", "api_error_status", "terminal_reason"):
-              if key in last:
-                  print("  %-18s %s" % (key, last[key]))
-
-          # api_error_status is the single most useful field: 401 means the
-          # token is bad, 429 means quota, 5xx means Anthropic-side.
-          status = last.get("api_error_status")
-          hint = {
-              401: "CLAUDE_CODE_OAUTH_TOKEN is invalid or expired — regenerate with `claude setup-token`.",
-              403: "The token is not authorised for this use.",
-              429: "Rate limited or subscription quota exhausted.",
-          }.get(status)
-          if hint:
-              print("  hint               %s" % hint)
-          elif last.get("is_error") and (last.get("num_turns") or 0) <= 1 \
-                  and not last.get("total_cost_usd"):
-              print("  hint               errored on turn 1 at zero cost, which almost"
-                    " always means the credential was rejected. Regenerate it with"
-                    " `claude setup-token` and re-set the repository secret.")
-          PY
+          if [ "$posted" -gt 0 ]; then
+            headline="AI review stopped early — $posted finding(s) were posted first"
+            body="🤖 The AI review stopped before finishing, after posting $posted inline finding(s) on this push. Those comments are real and worth reading; what is missing is the summary, so any severity counts shown above are from an earlier run and are now out of date. This does not block merging."
+          else
+            headline="AI review unavailable"
+            body="🤖 AI review unavailable for this push — the reviewer step did not complete. This does not block merging."
           fi
 
           {
-            echo "### AI review unavailable"
+            echo "### $headline"
             echo
             echo "The reviewer did not complete. This does **not** block the merge —"
             echo "review the changes yourself, and check the workflow logs if this repeats."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::warning title=AI review unavailable::The reviewer step failed; merge is not blocked"
-          gh pr comment "$PR_NUMBER" \
-            --body "🤖 AI review unavailable for this push — the reviewer step did not complete. This does not block merging." \
+          echo "::warning title=${headline}::The reviewer step failed; merge is not blocked"
+          gh pr comment "$PR_NUMBER" --body "$body" \
             || echo "Could not post the notice comment; the job summary above records it."
 
       # Opt-in only. An AI reviewer should not hold merge authority by default.
