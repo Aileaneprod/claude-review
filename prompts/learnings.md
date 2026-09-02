@@ -6,14 +6,14 @@ every review prompt, so it is the reviewer's memory.
 
 **Nothing lands here without evidence.** Every entry cites the pull request and
 the verdict that produced it. Entries are proposed by
-`scripts/propose-learnings.sh` from the harvested ledger under `feedback/`, and
-merged by a human. They are never written automatically — a wrong lesson does
-not degrade one review, it degrades every review in every repository until
-somebody notices.
+`scripts/propose-learnings.sh` from the harvested ledger, and merged by a human.
+They are never written automatically — a wrong lesson does not degrade one
+review, it degrades every review in every repository until somebody notices.
 
 Keep this file short. It competes for the reviewer's attention with the actual
 diff, and every line costs quota on every run. A lesson that has stopped earning
-its place should be deleted, not archived.
+its place should be deleted, not archived. State the rule, then the shortest
+evidence that proves it happened.
 
 Format: one `##` heading per lesson, an imperative rule, then the evidence.
 
@@ -26,15 +26,11 @@ review ran against — not the branch tip. A finding that was correct is
 indistinguishable from one that was wrong once the author has fixed it, because
 the contradiction you are looking for is exactly what they removed.
 
-**Evidence:** Aileaneprod/korbyx#13. A finding reported that a `course_progress`
-row marked `non_commence` on course `…0001` contradicted a graded
-`quiz_attempts` row for the same user on the same course. Re-verified against
-the branch tip, the contradiction was absent and the finding was scored a false
-positive. It was not: at `e4ab342`, the commit under review, both rows really
-did sit on course `…0001`. The author replied *"Corrigé en b7f5341, et le
-constat est exact"* and the fix commit is titled *"fix(kor-41): coherence
-semantique entre course_progress et quiz_attempts"*. The tip had already been
-repaired.
+**Evidence:** Aileaneprod/korbyx#13. A finding that a `non_commence`
+`course_progress` row contradicted a graded `quiz_attempts` row was scored a
+false positive against the tip, where the contradiction was gone. At `e4ab342`,
+the reviewed commit, it was real: *"Corrigé en b7f5341, et le constat est
+exact."*
 
 ---
 
@@ -45,13 +41,10 @@ two tables assert opposite facts about the same entity. Referential closure and
 temporal closure do not imply semantic closure. When a fixture set ships prose
 describing the scenarios it models, check that the rows actually model them.
 
-**Evidence:** Aileaneprod/korbyx#13, same finding as above. The author's reply is
-the clearest statement of the lesson: *"Ma passe de vérification contrôlait deux
-clôtures, la référentielle puis la temporelle. Il en manquait une troisième, la
-cohérence sémantique entre tables : une ligne peut être valide, correctement
-datée et référentiellement close tout en racontant le contraire d'une autre
-table."* They added that third check to the project's own test suite as a
-result, and proved it by deliberately reintroducing the defect.
+**Evidence:** Aileaneprod/korbyx#13, the same finding. The author: *"une ligne
+peut être valide, correctement datée et référentiellement close tout en
+racontant le contraire d'une autre table."* They added that third check to the
+test suite and proved it by reintroducing the defect.
 
 ---
 
@@ -61,12 +54,10 @@ Before asking for an ADR, a changelog entry, or any other artefact, check what
 the repo says about when that artefact is required. Asking for one the project
 has explicitly scoped out is noise, and it is noise that reads as authoritative.
 
-**Evidence:** Aileaneprod/korbyx#13, a CodeRabbit finding asked for an ADR
-covering the `test/scenarios` layout. The author replied *"Écarté"*, pointing at
-`AGENTS.md`, which reserves ADRs for structural decisions explicitly validated
-by the team, and at `docs/adr/README.md`, which states an ADR is not for
-documenting a decision in advance. The observation that no ADR existed was
-factually true; the demand was still wrong.
+**Evidence:** Aileaneprod/korbyx#13. A CodeRabbit finding asked for an ADR
+covering the `test/scenarios` layout. The author replied *"Écarté"*, citing
+`AGENTS.md`, which reserves ADRs for structural decisions already validated by
+the team. No ADR existed — true; the demand was still wrong.
 
 ---
 
@@ -76,10 +67,97 @@ When a document says something surprising, read the paragraphs around it before
 reporting it. Authors routinely pre-empt the obvious objection one paragraph
 earlier, and a finding that ignores that reads as if the reviewer skimmed.
 
-**Evidence:** Aileaneprod/korbyx#13, two CodeRabbit findings — both marked
-🔴 Bloquant — claimed the fixtures carried real pilot-client names, citing a line
-saying the naming divergence was *"la forme réellement rencontrée"*. Six lines
-above, the same README states *"Aucune donnée, aucun identifiant, aucun nom et
-aucun secret d'un client réel n'entre ici. Le réseau de franchise n'existe
-pas."* What was declared real was the shape of the divergence, not the names.
-Both threads remain unanswered by the author.
+**Evidence:** Aileaneprod/korbyx#13. Two CodeRabbit 🔴 findings claimed the
+fixtures carried real client names, citing *"la forme réellement rencontrée"*.
+Six lines above, the same README states *"Aucune donnée, aucun identifiant,
+aucun nom […] d'un client réel n'entre ici."* What was declared real was the
+shape of the divergence, not the names. Neither thread was ever answered.
+
+---
+
+## A legal identifier is real until the repository shows where it came from
+
+The lesson above settles names: a name the repository declares fictional is
+fictional, and accusing it is a false positive. It does not settle legal
+identifiers. A SIREN, SIRET, VAT number, IBAN or registration number shares its
+number space with reality, so "invented", a generator, or a passing checksum
+proves nothing — the value may still belong to a real company or a real person.
+When fixtures, scenarios or a memory file introduce such values, ask where they
+come from. `Grep` the working tree for the block the repository declares
+synthetic, and `gh pr diff` to see whether the value is even an added line.
+Taken from that declared block, or from an explicit list the PR says was checked
+against a registry: not a finding. New values from a generator with a realistic
+prefix, or values with no stated provenance: you cannot query a registry, so do
+not assert they are real — raise a 🟠 saying they are unverifiable as synthetic
+and name the block the repository already uses. And a file that states the
+no-real-identifier rule must be read for instances, not only for the rule.
+
+**Evidence:** Aileaneprod/korbyx#84. A Luhn-valid generator with prefix `810000`
+in a scenario whose README said every identifier was invented. A human queried
+the public registry: *"SIREN qui existent : 11 sur 12"*, eight of them
+*"entrepreneur individuel donc personne physique"* — personal data. We reviewed
+that commit, `55dd646`, and raised nothing. Fixed with an explicit
+`SYNTHETIC_SIRENS` list. Aileaneprod/korbyx#16: the file forbidding client names
+contained one three times; we reviewed the same commit, `72e3d65`, posted two
+other findings, and missed it. The check that works is ours on
+Aileaneprod/korbyx#46 — `DOM&VIE` in a schema comment, *"sans être déclaré
+fictif nulle part dans le dépôt"*, tied by the commit message to a measurement
+on the client's production: *"Finding valide, et entièrement de mon fait."*
+
+---
+
+## Count what the change promises, then find the promise the code does not keep
+
+A PR body's acceptance criteria, a README's list of stop conditions, a
+function's documented guarantees: enumerate them and tick each one against the
+code. The unmet one is the finding, and a criterion the PR itself states and
+does not meet is 🔴, because the author has already said it matters.
+`gh pr view --json body` is in the procedure for orientation; read it a second
+time as a checklist. Not a finding if the criterion is met somewhere the diff
+does not show — check before reporting, as always.
+
+**Evidence:** Aileaneprod/korbyx#38. The PR body's *« Critères d'acceptation et
+leurs preuves »* named `account.provider_id` = `"credential"`. The code declared
+provisioning complete after checking two of three conditions, so the CLI
+reported success for an account that could not sign in. The author: *"je
+vérifiais deux des trois conditions et j'ai manqué la troisième."* We reviewed
+that commit, `0618b01`, and did not raise it.
+
+---
+
+## A guard proved by a test that the guard does not apply to is not proved
+
+When a change adds an access control — row-level security, a permission check,
+a tenant scope — check which principal the tests run as. A superuser, an admin
+role or an owner connection bypasses the control, so a green test under it
+proves the test runs, not that the guard holds. Then read every call site the
+change touched as if it were the only one: a value that is correct where a
+substitution started is not necessarily the one in scope where it ended. Not a
+finding if the test explicitly switches to a role the control applies to.
+
+**Evidence:** Aileaneprod/korbyx#82, the PR that introduced RLS. A repository
+was scoped to the primary organisation while its helper ingested under another.
+The author: *"C'est vert aujourd'hui uniquement parce que le propriétaire est
+superutilisateur et contourne les policies. Autrement dit, exactement le mode de
+défaillance que cette PR existe pour supprimer, planté dans son propre test."*
+We reviewed that commit, `355db08`, and raised nothing on it.
+
+---
+
+## A foreign key proves the row exists, not that it is the right kind
+
+When a table extends a polymorphic root — a `business_object` carrying an
+`object_type`, a `node` carrying a `kind` — a foreign key on
+`(id, organization_id)` lets an extension of type A attach to a root declared
+type B. Look for the invariant that binds the extension to its discriminator:
+a composite key that includes the type column, or a check constraint, plus the
+negative test that inserts under a root of the wrong type. Not a finding if
+either already exists. If the root already lacked the invariant before the PR,
+say so — the finding is still real, and the fix belongs to a change that covers
+every extension.
+
+**Evidence:** Aileaneprod/korbyx#46. The author reproduced it with three inserts
+— *"Une `business_unit` vit donc bien sous une racine déclarée `legal_entity`.
+Le finding est réel."* — showed it was pre-existing on all three extensions, and
+fixed it in Aileaneprod/korbyx#54. We reviewed the same commit, `4852891`, and
+posted a different 🔴 on the same file.

@@ -29,6 +29,12 @@ max_findings: 12
 # only the highest-risk files. Raise it for repos with large mechanical diffs.
 max_diff_lines: 2000
 
+# Language the reviewer WRITES in — its findings and its summary comment. Empty
+# means: match the language the repository itself uses. Set it explicitly (e.g.
+# "français", "English") when the team wants one regardless of what the code
+# comments happen to be in. The reviewer reads code in any language either way.
+language: ""
+
 # Fail the check run when a blocking finding exists. Off by default — think
 # hard before giving an AI reviewer merge authority.
 fail_on_blocking: false

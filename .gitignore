@@ -11,6 +11,13 @@ credentials.json
 eval/.out/
 eval/*.log
 
+# Harvested review ledgers carry verbatim text from the repositories under
+# review — author replies, finding bodies, file paths. This repo is public by
+# constraint (docs/ARCHITECTURE.md, "The repo is public"), so they never
+# belong here. They live in the private ledger repository; harvest with
+# `scripts/harvest-feedback.sh --out <private-checkout>/feedback`.
+feedback/
+
 # OS / editor noise
 .DS_Store
 Thumbs.db
