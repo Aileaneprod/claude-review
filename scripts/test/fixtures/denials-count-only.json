@@ -1,0 +1,10 @@
+[
+ {
+  "type": "result",
+  "subtype": "error_max_turns",
+  "is_error": true,
+  "num_turns": 41,
+  "total_cost_usd": 1.48,
+  "permission_denials_count": 8
+ }
+]

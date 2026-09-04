@@ -3,7 +3,30 @@
 How to make the reviewer quieter, sharper, or cheaper — and how to know whether
 a change helped rather than just feeling like it did.
 
-## Before anything else: lint the workflows
+## Before anything else: run the tests
+
+```bash
+./scripts/test/run-tests.sh          # all cases
+./scripts/test/run-tests.sh --case resolve-config --verbose
+```
+
+`scripts/` had no tests until three defects reached commits in a single
+session, each one past a check that could not fail: a `language` guard proved
+against a 65-character payload while admitting a 32-character instruction, a
+denial reporter whose fixture used a message shape the API never emits, and a
+counter that counted attempted comments as posted ones. The person writing the
+check chose the input, so the input agreed with them.
+
+Hence the rule for `scripts/test/`: **a case is only worth adding if it fails
+against the code that had the bug.** Write it, watch it go red, then fix. The
+existing cases are all real defects, so they double as the record of what has
+already gone wrong.
+
+CI (`.github/workflows/ci.yml`) runs these plus `bash -n`, a YAML parse, the
+stub eval and the `learnings.md` size budget on every push and pull request. No
+model calls, so it costs nothing and gates everything.
+
+## Then: lint the workflows
 
 Any change to a `.yml` under `.github/workflows/` or to `templates/wrapper.yml`
 must pass [actionlint](https://github.com/rhysd/actionlint):

@@ -37,8 +37,19 @@ fi
 # reports the reviewer's own stack instead of the project's — a Next.js app was
 # classified `node-typescript,n8n` because eval/fixtures contains an n8n
 # workflow export. Anything scanning from the workspace root must skip it.
+#
+# `fixtures` and its siblings are pruned for the same reason, one level up. That
+# earlier fix only covered the reviewer checked out INSIDE another repository;
+# when claude-review reviews itself the very same files sit at the root, and
+# this repository detected as `n8n,postgres` — two irrelevant profiles appended
+# to every self-review — on the strength of
+# eval/fixtures/08-*/workflows/*.n8n.json and eval/fixtures/10-*/migrations/*.sql.
+# A fixture exists to imitate a stack that is not the repository's; that is what
+# makes it a fixture. A repo whose only evidence lives under one is genuinely
+# ambiguous, and `generic` is the right answer there.
 prune_dirs=(.git node_modules .venv venv site-packages dist build .next vendor
-            .claude-review-tooling)
+            .claude-review-tooling fixtures __fixtures__ testdata test-data
+            __snapshots__)
 
 # grep -r across the repo, skipping the prune list. Returns 1 when nothing
 # matches, which is an ordinary outcome here rather than an error.
@@ -88,7 +99,12 @@ fi
 [ "$is_fastapi" -eq 1 ] && profiles+=("python-fastapi")
 
 # --- node-typescript ---------------------------------------------------------
-if [ -f "${root}/tsconfig.json" ]; then
+# A root tsconfig.json is the single-package layout. A workspace keeps its
+# tsconfigs under the packages instead, so requiring one at the root missed
+# every monorepo: korbyx, a pnpm workspace with tsconfigs in apps/*, detected
+# `postgres` alone and never got the TypeScript checklist. find_named already
+# honours prune_dirs, so a vendored or fixture tsconfig cannot answer this.
+if [ -f "${root}/tsconfig.json" ] || [ -n "$(find_named 'tsconfig.json')" ]; then
   profiles+=("node-typescript")
 fi
 
@@ -140,14 +156,39 @@ find_migration_sql() {
   find "${args[@]}" 2>/dev/null | grep -Ei '/(migrations|drizzle)/' | head -n 1
 }
 
-is_postgres=0
-if [ -n "$(find_named 'drizzle.config.ts')" ] || [ -n "$(find_named 'drizzle.config.js')" ] \
-   || [ -n "$(find_named 'drizzle.config.mjs')" ] || [ -n "$(find_named 'schema.prisma')" ]; then
-  is_postgres=1
-elif [ -n "$(find_migration_sql)" ]; then
-  is_postgres=1
+# An ORM config is not evidence of PostgreSQL. Drizzle supports mysql, sqlite,
+# turso and singlestore alongside postgresql; Prisma supports mysql, sqlite,
+# sqlserver, mongodb and cockroachdb. Treating either as postgres appends a
+# checklist about RLS, polymorphic roots and `set_config` to a MySQL project —
+# quota spent on checks that cannot apply, inviting findings grounded in the
+# wrong engine. Read the dialect and require it to say postgres.
+postgres_dialect() {
+  local file
+  for file in $(find_named 'drizzle.config.ts') $(find_named 'drizzle.config.js') \
+              $(find_named 'drizzle.config.mjs') $(find_named 'drizzle.config.mts'); do
+    # Drizzle: `dialect: "postgresql"`, or the older `driver: "pg"`.
+    grep -Eqi "dialect[[:space:]]*:[[:space:]]*['\"]postgres" "$file" 2>/dev/null && return 0
+    grep -Eqi "driver[[:space:]]*:[[:space:]]*['\"]pg['\"]" "$file" 2>/dev/null && return 0
+  done
+  for file in $(find_named 'schema.prisma'); do
+    # Prisma: `provider = "postgresql"`.
+    grep -Eqi "provider[[:space:]]*=[[:space:]]*['\"]postgres" "$file" 2>/dev/null && return 0
+  done
+  return 1
+}
+
+# Raw SQL is only evidence if it is PostgreSQL-flavoured. `select 1;` is not.
+postgres_sql() {
+  local file
+  file="$(find_migration_sql)"
+  [ -n "$file" ] || return 1
+  grep -Eqi 'jsonb|uuid|serial|row level security|::|plpgsql|gen_random_uuid|create extension|text\[\]|timestamptz' \
+    "$file" 2>/dev/null
+}
+
+if postgres_dialect || postgres_sql; then
+  profiles+=("postgres")
 fi
-[ "$is_postgres" -eq 1 ] && profiles+=("postgres")
 
 # --- fallback ----------------------------------------------------------------
 if [ "${#profiles[@]}" -eq 0 ]; then

@@ -156,13 +156,37 @@ elif results and results[-1].get("permission_denials_count"):
 
 # Inline comments post the moment they are made, so a run that dies late has
 # usually already put real findings on the diff.
-posted = 0
+#
+# Count the calls that SUCCEEDED, not the calls that were made. A comment can be
+# rejected — GitHub refuses an anchor outside the diff hunks, which happened
+# twice on this repository's own first pull request — and reporting it as posted
+# sends the author looking for a comment that is not there. That is the exact
+# failure this whole notice exists to prevent, so it must not commit it itself.
+#
+# A call whose result never arrived (the run died between the two) is NOT
+# counted: under-reporting costs the author a comment they will find anyway,
+# over-reporting costs them a search for one that does not exist.
+inline_calls = set()
 for message in messages:
     for block in content_blocks(message):
         if (isinstance(block, dict)
                 and block.get("type") == "tool_use"
                 and "create_inline_comment" in str(block.get("name", ""))):
+            inline_calls.add(block.get("id"))
+
+posted = 0
+for message in messages:
+    for block in content_blocks(message):
+        if not isinstance(block, dict) or block.get("type") != "tool_result":
+            continue
+        if block.get("tool_use_id") in inline_calls and not block.get("is_error"):
             posted += 1
-print("  findings posted    %d" % posted)
+
+attempted = len(inline_calls)
+if attempted != posted:
+    print("  findings posted    %d (of %d attempted; the rest were rejected or"
+          " unconfirmed)" % (posted, attempted))
+else:
+    print("  findings posted    %d" % posted)
 emit_count(posted)
 PY

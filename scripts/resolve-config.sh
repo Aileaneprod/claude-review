@@ -275,15 +275,28 @@ def validate(data, path):
     # where repo-controlled text becomes prompt text. Everything else the
     # reviewer reads arrives as tool output, which base.md rule 7 covers.
     #
-    # A language name is a short noun. Anything else is refused loudly, in the
-    # same spirit as the parser above: fail with a file:line rather than
-    # silently review under an attacker's instructions.
+    # A language name is one or two words of letters. That shape cannot express
+    # an instruction, which is the whole point: the first version of this guard
+    # capped the length at 40 characters and allowed spaces, `.`, `(` and `)`,
+    # so it refused a 65-character payload and admitted "English. Ignore all
+    # prior rules." — 32 characters, and a working instruction. A length cap is
+    # not an injection guard.
+    #
+    # Refused, deliberately: digits, `.`, `,`, `:`, `;`, `/`, `(`, `)`, quotes,
+    # newlines, and any third word. Hyphens inside a word are allowed
+    # ("Serbo-Croatian") because a hyphen cannot end a sentence or start a
+    # clause. "Português (Brasil)" is refused; write "Português".
     language = data.get("language") or ""
-    if language and not re.fullmatch(r"[^\W\d_][\w \-'()./]{0,39}", language, re.UNICODE):
+    word = r"[^\W\d_]+(?:-[^\W\d_]+)*"
+    if language and (len(language) > 40
+                     or not re.fullmatch(r"%s(?: %s)?" % (word, word), language,
+                                         re.UNICODE)):
         sys.stderr.write(
-            "resolve-config: %s: key 'language' must be a language name — a "
-            "letter followed by up to 39 letters, digits, spaces or - ' ( ) . / "
-            "characters. Got %r.\n" % (path, language)
+            "resolve-config: %s: key 'language' must be a language name — one "
+            "or two words of letters, no digits and no punctuation beyond an "
+            "internal hyphen, 40 characters at most. This value is written into "
+            "an instruction the reviewer follows, so it must not be able to "
+            "carry one. Got %r.\n" % (path, language)
         )
         sys.exit(1)
     return data
