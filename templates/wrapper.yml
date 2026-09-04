@@ -101,3 +101,10 @@ jobs:
       use_github_app: true
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # Optional. With it, the reviewer reads the Linear ticket this pull
+      # request names and checks the change against what the ticket asked for.
+      # Without it — the secret simply absent — the reviewer says so and reviews
+      # the change on its own terms. Passed BY NAME, like the token above:
+      # `secrets: inherit` would hand the called workflow every other secret
+      # this repository holds. See docs/SETUP.md step 3d.
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}

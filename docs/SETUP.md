@@ -225,6 +225,46 @@ gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo CLIENT-ORG/their-repo
 You need admin (or at least "manage secrets") permission on that repo for this
 to succeed.
 
+### 3d bis. The Linear key, if you want ticket-aware reviews (optional)
+
+With a Linear API key, the reviewer reads the ticket a pull request names — from
+the title (`KOR-238 : …`) or the branch (`user/kor-238-…`) — and checks the
+change against what the ticket actually asked for. Without it, everything works
+exactly as before; the reviewer says no ticket was available and reviews the
+change on its own terms.
+
+This exists because of a measured miss. On `Aileaneprod/korbyx#70` the three
+states a login screen had to distinguish were written in the ticket and nowhere
+else. CodeRabbit reads Linear and found the unmet criterion; we did not.
+
+```bash
+gh secret set LINEAR_API_KEY --repo OWNER/REPO
+```
+
+Paste at the prompt — the input is masked, so nothing appears. Then add the
+matching line to that repo's `.github/workflows/ai-review.yml`, which
+`templates/wrapper.yml` already carries:
+
+```yaml
+      LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+```
+
+Two things worth knowing before you create the key:
+
+- **Linear does not document scoping or a read-only restriction for personal
+  API keys.** Treat one as carrying the full access of whoever created it. For
+  least privilege, create it from a Linear member with view-only access to the
+  team whose tickets you want read.
+- **The step that reads the secret lives in `review.yml` here, not in the
+  project's wrapper.** A pull request author in the project repo cannot modify
+  it, and under App mode the wrapper must be byte-identical to the copy on the
+  default branch. That is what keeps the key out of reach of the code under
+  review.
+
+The ticket is written to a file the reviewer `Read`s, never interpolated into
+the prompt — the same discipline as the pull request title and body, for the
+same reason (`docs/ARCHITECTURE.md`, "Prompt injection").
+
 ### 3e. Which repos still need it?
 
 Run this to scan every repo you personally own and flag the ones missing the
