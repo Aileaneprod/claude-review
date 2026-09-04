@@ -68,8 +68,11 @@ jobs:
           raise SystemExit(1 if failed else 0)
           PY
 
+      # Invoked through `bash` on purpose. Run directly, a lost executable bit
+      # fails here as a bare exit 126, which says nothing; the repo-hygiene case
+      # inside the suite checks the committed mode and names the file.
       - name: Script tests
-        run: ./scripts/test/run-tests.sh --verbose
+        run: bash ./scripts/test/run-tests.sh --verbose
 
       - name: Prompt eval (stub — replays committed responses, no model call)
         run: ./eval/run-eval.sh
