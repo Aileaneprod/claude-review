@@ -1,0 +1,66 @@
+[
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "p1",
+     "name": "mcp__github_inline_comment__create_inline_comment",
+     "input": {
+      "path": "a.ts"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "p1",
+     "is_error": false,
+     "content": "posted"
+    }
+   ]
+  }
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "p2",
+     "name": "mcp__github_inline_comment__create_inline_comment",
+     "input": {
+      "path": "b.ts"
+     }
+    }
+   ]
+  }
+ },
+ {
+  "type": "user",
+  "message": {
+   "content": [
+    {
+     "type": "tool_result",
+     "tool_use_id": "p2",
+     "is_error": true,
+     "content": "line is outside the diff; comment rejected"
+    }
+   ]
+  }
+ },
+ {
+  "type": "result",
+  "subtype": "error_max_turns",
+  "is_error": true,
+  "num_turns": 41,
+  "total_cost_usd": 1.4,
+  "permission_denials": []
+ }
+]

@@ -12,8 +12,11 @@ apply with full force: open the migration, open the schema, open the test.
   principal the tests connect as. A superuser bypasses RLS **even under
   `FORCE ROW LEVEL SECURITY`**; so does the table owner unless `FORCE` is set.
   A green test under either proves the test runs, not that the policy holds.
-  *Not a finding if* the test explicitly switches role (`SET ROLE`, a distinct
-  connection string, a role the policy names) before asserting.
+  *Not a finding if* the test runs as a principal the policy actually binds:
+  neither superuser nor `BYPASSRLS`, and — when it owns the table — under
+  `FORCE ROW LEVEL SECURITY`. A `SET ROLE` or a separate connection string is
+  **not** sufficient on its own; both are satisfied by switching to another
+  superuser. Look for what the role *is*, not for the act of switching.
 - **`ENABLE ROW LEVEL SECURITY` without `FORCE`** leaves the owner exempt. If
   the application connects as the owner, the policy is decoration.
 - **A policy that reads a session setting** (`current_setting('app.org_id')`)

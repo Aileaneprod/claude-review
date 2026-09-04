@@ -1,0 +1,95 @@
+# Checks that cost nothing and gate everything.
+#
+# No model calls, no secrets, no network beyond the checkout — so this runs on
+# every push and every pull request, unlike `Prompt eval` (dispatch-only,
+# spends quota) and `Self review` (spends quota).
+#
+# Deliberately dependency-free, by the same rule as the rest of the pipeline
+# (docs/ARCHITECTURE.md): bash and stock python3, nothing installed. That is why
+# actionlint is NOT here — installing it means either curl|bash or an unpinned
+# third-party action, and this repository refuses looser supply-chain trades
+# elsewhere. It stays a local gate, mandated by docs/TUNING.md. The YAML parse
+# below catches the structural breakage; it does not catch a context that does
+# not exist, which is what actionlint is for.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-review-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Scripts, prompts and workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          failed=0
+          while IFS= read -r script; do
+            if ! bash -n "$script"; then
+              echo "::error file=$script::bash -n failed"
+              failed=1
+            fi
+          done < <(find scripts eval -name '*.sh' -type f | sort)
+          exit "$failed"
+
+      - name: Workflow YAML parses
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib
+          import sys
+          try:
+              import yaml
+          except ImportError:
+              print("PyYAML absent on this runner; skipping the parse check.")
+              raise SystemExit(0)
+
+          failed = False
+          for path in sorted(pathlib.Path(".github/workflows").glob("*.yml")):
+              try:
+                  yaml.safe_load(path.read_text(encoding="utf-8"))
+                  print("  ok  %s" % path)
+              except Exception as exc:
+                  print("::error file=%s::%s" % (path, exc))
+                  failed = True
+          raise SystemExit(1 if failed else 0)
+          PY
+
+      - name: Script tests
+        run: ./scripts/test/run-tests.sh --verbose
+
+      - name: Prompt eval (stub — replays committed responses, no model call)
+        run: ./eval/run-eval.sh
+
+      - name: Prompt assembles, with and without a repo-local memory
+        run: |
+          set -euo pipefail
+          ./scripts/resolve-config.sh > "$RUNNER_TEMP/cfg.json"
+          printf 'src/example.ts\n' > "$RUNNER_TEMP/files.txt"
+          ./scripts/build-prompt.sh \
+            --config "$RUNNER_TEMP/cfg.json" --repo owner/repo --pr 1 \
+            --changed-files "$RUNNER_TEMP/files.txt" \
+            --profiles node-typescript,postgres \
+            --repo-root "$RUNNER_TEMP/absent" \
+            --out "$RUNNER_TEMP/prompt.md"
+          # The reviewer's memory is read on every review, so its size is a
+          # standing cost. Fail if it creeps past the budget docs/TUNING.md sets.
+          bytes="$(wc -c < prompts/learnings.md)"
+          echo "learnings.md: ${bytes} bytes"
+          if [ "$bytes" -gt 7500 ]; then
+            echo "::error file=prompts/learnings.md::${bytes} bytes exceeds the 7500-byte budget"
+            exit 1
+          fi
