@@ -1,0 +1,17 @@
+{
+ "data": {
+  "issues": {
+   "nodes": [
+    {
+     "identifier": "KOR-238",
+     "title": "Sign in from a screen, not the console",
+     "state": {
+      "name": "In Progress"
+     },
+     "description": "The screen must distinguish three states: loading, bad credentials, and the server being unreachable.\n\nA user with no membership sees a message saying so.",
+     "url": "https://linear.app/korbyx/issue/KOR-238"
+    }
+   ]
+  }
+ }
+}

@@ -78,6 +78,13 @@ on:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude Code OAuth token from `claude setup-token`."
         required: true
+      LINEAR_API_KEY:
+        description: >-
+          Optional. A Linear API key with read access, used to put the ticket a
+          pull request names in front of the reviewer. Without it the reviewer
+          says so and reviews the change on its own terms — the same behaviour
+          as before this input existed.
+        required: false
 
 # GUARD 0 — cancel superseded runs.
 # A push to a PR that is already being reviewed makes the in-flight review
@@ -397,6 +404,33 @@ jobs:
           fi
           printf 'names=%s\n' "$detected" >> "$GITHUB_OUTPUT"
           printf 'Profile(s): %s\n' "$detected"
+
+      # The ticket the pull request claims to implement, written to a file the
+      # reviewer reads. It is NOT interpolated into the prompt: whoever files
+      # tickets writes that text, so it must arrive as tool output — data under
+      # base.md rule 7 — exactly like the pull request title and body.
+      #
+      # This closes a measured gap. On Aileaneprod/korbyx#70 the three states the
+      # login screen had to distinguish were stated in the ticket and nowhere
+      # else; CodeRabbit reads Linear and found the unmet criterion, we did not.
+      #
+      # It lands under .claude-review-tooling/, which is outside the reviewed
+      # file set, so the reviewer never mistakes the ticket for a file to review.
+      # The step always writes the file and never fails the job.
+      - name: Fetch the linked ticket
+        if: steps.scope.outputs.has_files == 'true'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          .claude-review-tooling/scripts/fetch-ticket.sh \
+            --out .claude-review-tooling/context/ticket.md \
+            --title "$PR_TITLE" \
+            --branch "$HEAD_BRANCH"
 
       # Findings already posted on this PR are fed back into the prompt so a
       # re-review after a push does not repeat what the author has already read.
