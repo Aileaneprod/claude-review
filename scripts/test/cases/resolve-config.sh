@@ -11,7 +11,7 @@
 
 _lang_config() {
   local value="$1"
-  local dir="${TMPDIR:-/tmp}/cr-test-lang"
+  local dir="$TESTTMP/lang"
   mkdir -p "$dir"
   python3 -c "
 import sys

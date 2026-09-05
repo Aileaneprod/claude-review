@@ -12,7 +12,7 @@ _detect() { "$SCRIPTS/detect-profile.sh" "$1" | paste -sd, -; }
 _fixture_repo() {
   # Build a throwaway repo shape and echo its path.
   local name="$1"; shift
-  local dir="${TMPDIR:-/tmp}/cr-test-repos/$name"
+  local dir="$TESTTMP/repos/$name"
   rm -rf "$dir"; mkdir -p "$dir"
   while [ "$#" -gt 0 ]; do
     local path="$1" content="$2"; shift 2

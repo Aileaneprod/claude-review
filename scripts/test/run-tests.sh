@@ -29,6 +29,17 @@ repo_root="$(cd -- "${script_dir}/../.." && pwd)"
 export SCRIPTS="${repo_root}/scripts"
 export FIXTURES="${script_dir}/fixtures"
 
+# Scratch space every process agrees on. On Windows, bash maps /tmp into the
+# user's temp directory while python3 reads it as a literal \tmp at the drive
+# root — so a case that writes with one and reads with the other silently uses
+# two different files. cygpath -m yields C:/... , which both accept.
+TESTTMP="${TMPDIR:-/tmp}/cr-tests"
+mkdir -p "$TESTTMP"
+if command -v cygpath >/dev/null 2>&1; then
+  TESTTMP="$(cygpath -m "$TESTTMP")"
+fi
+export TESTTMP
+
 only_case=""
 verbose=0
 

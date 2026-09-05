@@ -60,7 +60,7 @@ assert_contains "ran out of turns" "error_max_turns is explained" -- _exec denia
 
 it "writes the posted count to --count-out"
 _count() {
-  local out="${TMPDIR:-/tmp}/cr-test-count"
+  local out="$TESTTMP/count"
   "$SCRIPTS/explain-failure.sh" --execution-file "$FIXTURES/$1" --count-out "$out" >/dev/null 2>&1
   cat "$out"
 }
