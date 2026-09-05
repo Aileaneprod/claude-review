@@ -13,7 +13,7 @@
 # The ticket body is written by whoever files tickets, so it is material under
 # review (base.md rule 7), not instruction. The file says so in its own header.
 
-_out() { printf '%s' "${TMPDIR:-/tmp}/cr-test-ticket.md"; }
+_out() { printf '%s' "$TESTTMP/ticket.md"; }
 _fetch() { "$SCRIPTS/fetch-ticket.sh" --out "$(_out)" "$@"; }
 _body() { cat "$(_out)"; }
 
