@@ -311,7 +311,14 @@ SEVERITY_EMOJI = ("🔴", "🟠", "🟡")
 
 
 def looks_like_summary(text):
-    return all(emoji in (text or "") for emoji in SEVERITY_EMOJI)
+    # In the TABLE, not merely somewhere in the text. "J'ai releve des points
+    # 🔴, 🟠 et 🟡 ; je continue" carries all three and is exactly the
+    # kind of sentence a run ends on mid-thought. Requiring each one inside a
+    # markdown row keeps the check structural, and structure survives
+    # translation where a header string does not.
+    rows = [line.strip() for line in (text or "").splitlines()
+            if line.strip().startswith("|")]
+    return all(any(emoji in row for row in rows) for emoji in SEVERITY_EMOJI)
 
 
 if summary and not looks_like_summary(summary):
