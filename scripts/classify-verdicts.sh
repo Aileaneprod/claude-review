@@ -11,8 +11,12 @@
 #   --keyword-only       Skip the model entirely. No credential needed.
 #   --only-unclassified  Only findings without a verdict yet. Default: all.
 #   --max-calls N        Hard ceiling on model calls. Default 300.
-#   --gold FILE          JSON map {"repo#pr|path|line": "verdict"} of verdicts a
-#                        human read. Prints agreement.
+#   --gold FILE          JSON map of verdicts a human read, keyed exactly as the
+#                        script keys findings:
+#                          "<repo>#<pr>|<path>|<line>|<first 8 of sha256(finding)>"
+#                        Every finding carries that string in its `key` field, so
+#                        build a gold file from the ledger rather than by hand. A
+#                        key that matches nothing exits 2 rather than scoring 100%.
 #   --min-agreement PCT  Exit 1 if agreement with --gold falls below this.
 #   --model ID           Model for the LLM pass. Read the current id from the
 #                        docs; do not carry one in your head.
@@ -137,7 +141,17 @@ ACK = (r"fil soldé", r"fil solde", r"noté\b", r"je regarde",
 
 
 def _compile(needles):
-    return [(n, re.compile(r"(?<!\w)(?:%s)" % n, re.UNICODE)) for n in needles]
+    """Word-boundary-prefixed, EXCEPT for needles that begin with punctuation.
+
+    `(?<!\w)` before `\?` demands a non-word character in front of the question
+    mark, so spaced French ("par là ?") matched and "you mean?" did not — the
+    replies most likely to be questions were the ones it missed.
+    """
+    out = []
+    for n in needles:
+        pattern = n if n.startswith("\\") else r"(?<!\w)(?:%s)" % n
+        out.append((n, re.compile(pattern, re.UNICODE)))
+    return out
 
 
 ACCEPT_RE, REJECT_RE, PARTIAL_RE, ACK_RE = (
@@ -165,8 +179,18 @@ def normalise(text):
 #
 # `vu` maps to accepted because CONTRIBUTING.md defines it that way: the finding
 # is good, and handled somewhere other than this pull request.
-FIRST_WORD = (("retenu", "accepted"), ("ecart", "rejected"),
-              ("partiel", "partial"), ("vu", "accepted"))
+# Prefixes, because these words inflect: retenue, écartée, partiellement.
+FIRST_WORD = (("retenu", "accepted"), ("ecart", "rejected"), ("partiel", "partial"))
+
+# `vu` needs the label to be FOLLOWED BY PUNCTUATION, not merely to be the first
+# word. Two letters swallow far too much on their own: "Vulnérable", "Vue",
+# "Vus" — and above all "Vu que", the ordinary French connector meaning "given
+# that", which opens plenty of replies that are outright refusals. Matching the
+# bare word is not enough either, because first_word() reduces "Vu." and
+# "Vu que" to the same thing. Scoring those as acceptances would inflate the
+# precision figure this ledger exists to report, in our own favour.
+FIRST_WORD_EXACT = ((re.compile(r"^[*_>#\s-]*vu\s*(?:[.,:;!?—–-]|$)", re.UNICODE),
+                     "accepted"),)
 
 
 def first_word(text):
@@ -207,6 +231,13 @@ def keyword_verdict(reply):
 
     # An exact mandated label outranks everything below it.
     word = first_word(reply)
+    # Accent-stripped, lower-cased original, so the label test sees the
+    # punctuation that first_word() throws away.
+    plain = unicodedata.normalize("NFD", (reply or "").strip().lower())
+    plain = "".join(c for c in plain if not unicodedata.combining(c))
+    for pattern, verdict in FIRST_WORD_EXACT:
+        if pattern.match(plain):
+            return verdict
     for prefix, verdict in FIRST_WORD:
         if word.startswith(prefix):
             return verdict
