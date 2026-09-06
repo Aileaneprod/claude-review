@@ -92,7 +92,16 @@ assert_equal "rejected" "$(_verdict 'Écarté — le constat est exact sur le fo
 assert_equal "partial"  "$(_verdict 'Partiel : la moitié est corrigée.')" "Partiel"
 
 it "reads Vu as an acceptance, per CONTRIBUTING.md"
-assert_equal "accepted" "$(_verdict 'Vu. Le constat est bon, il part dans KOR-233.')" "Vu"
+assert_equal "accepted" "$(_verdict 'Vu. Le constat est bon, il part dans KOR-233.')" "Vu."
+assert_equal "accepted" "$(_verdict 'Vu, le constat part dans KOR-233.')" "Vu,"
+
+it "does not take every word starting with vu for the label"
+# `vu` is two letters, so prefix matching swallows real words. PR #2 used exact
+# equality for exactly this reason; folding it into the prefix table lost that.
+# "Vu que" is the ordinary French connector — "given that" — and opens plenty of
+# replies that are not acceptances at all.
+assert_equal "rejected" "$(_verdict 'Vu que le contrat ne borne pas la valeur, ce constat est un faux positif.')"   "Vu que ... is a connector, not the label"
+assert_not_contains "accepted" "Vulnérable is not Vu" -- _verdict 'Vulnérable seulement si le rôle bypasse la RLS, ce que rien ne fait ici.'
 
 it "reads the mandated word through markdown and accents"
 assert_equal "accepted" "$(_verdict '**Retenu**, et corrigé.')"  "bold Retenu"
