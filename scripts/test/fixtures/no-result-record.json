@@ -1,0 +1,19 @@
+[
+ {
+  "type": "system",
+  "subtype": "init",
+  "message": "Claude Code initialized",
+  "model": "claude-sonnet-5"
+ },
+ {
+  "type": "assistant",
+  "message": {
+   "content": [
+    {
+     "type": "text",
+     "text": "Let me read the migration first."
+    }
+   ]
+  }
+ }
+]

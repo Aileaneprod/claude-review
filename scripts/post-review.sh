@@ -5,7 +5,8 @@
 # Usage:
 #   post-review.sh --mode pre  --repo OWNER/REPO --pr N --out FILE
 #   post-review.sh --mode post --repo OWNER/REPO --pr N \
-#                  [--execution-file FILE] [--body-file FILE] [--dry-run]
+#                  [--execution-file FILE] [--body-file FILE] \
+#                  [--posted-out FILE] [--dry-run]
 #
 # pre   Read the existing sticky comment's finding ledger plus the inline review
 #       comments already on the PR, and write them as markdown to --out. That
@@ -22,6 +23,18 @@
 #       nothing — a crashed run, a truncated transcript — we fall back to a
 #       summary the reviewer posted itself and adopt it in place.
 #
+#       --posted-out writes `true` or `false`: whether a comment actually
+#       landed. This is the ONLY witness of that, and review.yml gates its
+#       "AI review unavailable" notice on it.
+#
+#       That notice used to key off the reviewer step's exit code, which is a
+#       different question. `claude-code-action` validates the turn count
+#       AFTER the run and fails the step when it overran, even when the CLI
+#       reported success — so a finished review was announced as unavailable
+#       and its summary thrown away (Aileaneprod/korbyx#110, run 34058925818).
+#       Two conditions derived from one signal also drift: the pair could both
+#       speak, or both stay silent. One witness, consulted once.
+#
 # Requires: gh (authenticated via GH_TOKEN), python3.
 
 set -euo pipefail
@@ -36,6 +49,7 @@ pr_number=""
 out_file=""
 execution_file=""
 body_file=""
+posted_out=""
 dry_run=0
 
 die() {
@@ -51,8 +65,9 @@ while [ "$#" -gt 0 ]; do
     --out)            [ "$#" -ge 2 ] || die "--out requires a value";            out_file="$2";       shift 2 ;;
     --execution-file) [ "$#" -ge 2 ] || die "--execution-file requires a value"; execution_file="$2"; shift 2 ;;
     --body-file)      [ "$#" -ge 2 ] || die "--body-file requires a value";      body_file="$2";      shift 2 ;;
+    --posted-out)     [ "$#" -ge 2 ] || die "--posted-out requires a value";     posted_out="$2";     shift 2 ;;
     --dry-run)        dry_run=1; shift ;;
-    -h|--help)        sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done
@@ -67,6 +82,12 @@ command -v python3 >/dev/null 2>&1 || die "python3 is not installed"
 work_dir="$(mktemp -d)"
 cleanup() { rm -rf "$work_dir"; }
 trap cleanup EXIT
+
+# Every exit from here on has already answered "did a comment land?" with
+# `false`. Only the code that watched the API call succeed upgrades it, so a
+# crash, a `die`, or a path nobody anticipated cannot be read as a yes.
+record_posted() { [ -n "$posted_out" ] && printf '%s' "$1" > "$posted_out"; return 0; }
+record_posted false
 
 # `gh api --paginate --slurp` returns an array of pages; flatten one level so
 # downstream code always sees a flat list of objects.
@@ -268,6 +289,37 @@ review_comments = load(review_path)
 existing = [c for c in issue_comments if marker in (c.get("body") or "")]
 existing.sort(key=lambda c: c.get("id") or 0)
 
+# Does this text look like the review summary, or like the reviewer talking?
+#
+# base.md mandates a counts table carrying all three severity emoji, "even when
+# all counts are zero", and tells the reviewer to use those exact emoji
+# everywhere. The emoji are therefore the one part of the format that survives
+# translation — which matters, because Aileaneprod/korbyx runs with
+# `language: français` and its table reads `| Severite | Nombre |`. The old test
+# looked for the literal English `| Severity | Count |`, so on the repository
+# this tool was built for it could never match; the ledger holds no file
+# containing that string, while the emoji appear throughout.
+#
+# The check earns its place upstream too. The summary is whatever assistant text
+# came last, and the sticky comment is a PATCH: it REPLACES the previous body.
+# A run that ends on "Let me check the auth module next" would overwrite a good
+# summary from the previous push with that sentence, and nothing in the comment
+# would tell the reader it is not this push's review. Refusing to post leaves
+# the old summary standing and lets the "unavailable" notice speak instead,
+# which is the honest pair.
+SEVERITY_EMOJI = ("🔴", "🟠", "🟡")
+
+
+def looks_like_summary(text):
+    return all(emoji in (text or "") for emoji in SEVERITY_EMOJI)
+
+
+if summary and not looks_like_summary(summary):
+    sys.stderr.write(
+        "post-review: the recovered text carries no counts table, so it is not"
+        " the summary; leaving any existing one in place\n")
+    summary = ""
+
 adopted = None
 if not summary:
     # Fallback: the reviewer posted its own summary despite being told not to.
@@ -276,7 +328,7 @@ if not summary:
         body = comment.get("body") or ""
         if marker in body:
             continue
-        if "| Severity | Count |" in body or "🔴 Blocking" in body:
+        if looks_like_summary(body):
             summary = body.strip()
             adopted = comment.get("id")
             break
@@ -374,10 +426,12 @@ if [ "$action" = "patch" ]; then
   comment_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${work_dir}/plan.json")"
   gh api "repos/${repo}/issues/comments/${comment_id}" \
     --method PATCH --input "${work_dir}/payload.json" >/dev/null
+  record_posted true
   printf 'post-review: updated sticky comment %s\n' "$comment_id" >&2
 else
   gh api "repos/${repo}/issues/${pr_number}/comments" \
     --method POST --input "${work_dir}/payload.json" >/dev/null
+  record_posted true
   printf 'post-review: created sticky comment\n' >&2
 fi
 

@@ -1,0 +1,16 @@
+[
+ {
+  "type": "system",
+  "subtype": "init",
+  "message": "Claude Code initialized",
+  "model": "claude-sonnet-5"
+ },
+ {
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 43,
+  "terminal_reason": "completed",
+  "total_cost_usd": 0.87
+ }
+]

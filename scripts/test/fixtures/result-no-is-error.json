@@ -1,0 +1,13 @@
+[
+ {
+  "type": "system",
+  "subtype": "init",
+  "message": "Claude Code initialized",
+  "model": "claude-sonnet-5"
+ },
+ {
+  "type": "result",
+  "subtype": "success",
+  "num_turns": 30
+ }
+]
