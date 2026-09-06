@@ -552,9 +552,53 @@ jobs:
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: ${{ steps.args.outputs.value }}
 
+      # Did the review actually happen? `steps.claude.outcome` was asked that
+      # question for months and is not able to answer it. The action validates
+      # the turn count AFTER the run and fails the step when `num_turns` exceeds
+      # `--max-turns` even though the CLI itself reported success — so a finished
+      # review comes back as a failed step. Aileaneprod/korbyx#110, run
+      # 34058925818: subtype success, terminal_reason completed, 43 turns, $0.87,
+      # and the author was told "AI review unavailable".
+      #
+      # The decision is computed once, here, and the two steps below read it. A
+      # GitHub `if:` cannot read a file, so the alternative is two steps each
+      # running their own shell test — which is how you get both of them
+      # speaking, or neither.
+      #
+      # `if:` names only has_files. No `always()`: `continue-on-error` on the
+      # reviewer keeps the implicit `success()` true, so this still runs after a
+      # failed review, while a run cancelled by `cancel-in-progress` skips the
+      # rest as it should. An obsolete run must not race the winning one for the
+      # sticky comment.
+      - name: Classify the review outcome
+        id: verdict
+        if: steps.scope.outputs.has_files == 'true'
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          # Written BEFORE the script runs. Everything this workflow cannot
+          # establish has to land on `unavailable`, which speaks to the author;
+          # never on the value that claims a review happened.
+          verdict_file="$RUNNER_TEMP/verdict"
+          echo unavailable > "$verdict_file"
+          .claude-review-tooling/scripts/classify-run.sh --execution-file "${EXECUTION_FILE:-}" --verdict-out "$verdict_file" || true
+          value=unavailable
+          if [ "$(cat "$verdict_file" 2>/dev/null || true)" = completed ]; then
+            value=completed
+          fi
+          echo "value=$value" >> "$GITHUB_OUTPUT"
+
+      # A successful result record proves the reviewer FINISHED. It cannot prove
+      # anything was DELIVERED: the action writes the execution file ~9 ms before
+      # it flushes buffered inline comments, so no field in that file witnesses
+      # the flush. post-review.sh is the only thing that knows whether a comment
+      # actually landed, so it says so in --posted-out and the notice below keys
+      # off that — not off a second reading of the execution file.
       - name: Post the sticky summary
         id: summary
-        if: steps.scope.outputs.has_files == 'true' && steps.claude.outcome == 'success'
+        if: steps.scope.outputs.has_files == 'true' && steps.verdict.outputs.value == 'completed'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -562,17 +606,31 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          args=(--mode post --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER")
+          # Same discipline as the verdict: the pessimistic answer is on disk
+          # before anything can fail to overwrite it.
+          echo false > "$RUNNER_TEMP/posted"
+          args=(--mode post --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER"
+                --posted-out "$RUNNER_TEMP/posted")
           if [ -n "${EXECUTION_FILE:-}" ] && [ -f "$EXECUTION_FILE" ]; then
             args+=(--execution-file "$EXECUTION_FILE")
           fi
           .claude-review-tooling/scripts/post-review.sh "${args[@]}"
+          echo "posted=$(cat "$RUNNER_TEMP/posted")" >> "$GITHUB_OUTPUT"
 
-      # The action exposes no usable `conclusion` output — it sets one
-      # internally but does not declare it, and composite actions only surface
-      # declared outputs. `steps.claude.outcome` is the reliable signal.
+      # One question, asked of the only step that can answer it: did a summary
+      # comment actually land? `steps.summary.outputs.posted` is empty when that
+      # step was skipped (verdict unavailable) or died, and 'false' when it ran
+      # and found nothing worth posting. Every one of those must reach the
+      # author, so the test is `!= 'true'` and silence falls into the speaking
+      # branch by default.
+      #
+      # This used to read `steps.claude.outcome == 'failure'`, the exact mirror
+      # of the summary step's condition. Two conditions derived from one signal
+      # stay consistent only while that signal means what both of them assume —
+      # and it stopped meaning it the moment the action began failing successful
+      # runs over their turn count.
       - name: Report that the review was unavailable
-        if: steps.scope.outputs.has_files == 'true' && steps.claude.outcome == 'failure'
+        if: steps.scope.outputs.has_files == 'true' && steps.summary.outputs.posted != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
