@@ -79,6 +79,26 @@ assert_equal "rejected" \
   "$(_verdict 'Écarté pour ce ticket. Le constat est exact sur le fond, mais son déclencheur est nommé ailleurs.')" \
   "an opening Écarté wins over a later 'le constat est exact'"
 
+# --- the first word decides, when the repository asks for one ----------------
+# korbyx/CONTRIBUTING.md mandates Retenu / Écarté / Partiel / Vu at the head of
+# every reply. An exact label beats any amount of vocabulary, and it fixes a
+# case the opening-window rule gets WRONG on its own: "Retenu — le faux positif
+# est sur le point voisin" opens with an acceptance and mentions a rejection
+# word four words later, so precedence alone inverts it.
+
+it "takes the first word as the verdict when there is one"
+assert_equal "accepted" "$(_verdict 'Retenu — le faux positif est sur le point voisin.')"   "Retenu wins over a rejection word right behind it"
+assert_equal "rejected" "$(_verdict 'Écarté — le constat est exact sur le fond.')"   "Écarté wins over an acceptance word right behind it"
+assert_equal "partial"  "$(_verdict 'Partiel : la moitié est corrigée.')" "Partiel"
+
+it "reads Vu as an acceptance, per CONTRIBUTING.md"
+assert_equal "accepted" "$(_verdict 'Vu. Le constat est bon, il part dans KOR-233.')" "Vu"
+
+it "reads the mandated word through markdown and accents"
+assert_equal "accepted" "$(_verdict '**Retenu**, et corrigé.')"  "bold Retenu"
+assert_equal "rejected" "$(_verdict 'ecarte, sans accent.')"     "unaccented ecarte"
+assert_equal "accepted" "$(_verdict '> Retenu, en citation.')"   "quoted Retenu"
+
 # --- a reply that answers without judging ------------------------------------
 
 it "separates acknowledgement from a verdict"

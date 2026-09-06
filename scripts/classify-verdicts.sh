@@ -88,6 +88,7 @@ import json
 import os
 import re
 import sys
+import unicodedata
 import urllib.request
 
 ledger_dir = os.environ["LEDGER_DIR"]
@@ -151,6 +152,30 @@ def normalise(text):
     return " ".join((text or "").lower().split())
 
 
+# THE FIRST WORD DECIDES, when the repository asks for one. This mirrors
+# harvest-feedback.sh, deliberately: a repo that mandates a vocabulary should
+# get the same answer from the cheap hint and from the measurement, and two
+# classifiers disagreeing silently is worse than either being crude.
+#
+# korbyx/CONTRIBUTING.md mandates Retenu / Écarté / Partiel / Vu. An exact label
+# beats any amount of vocabulary — and it repairs a case the opening-window rule
+# gets backwards on its own: "Retenu — le faux positif est sur le point voisin"
+# opens with an acceptance and carries a rejection word four words later, so
+# precedence alone inverts what the author wrote.
+#
+# `vu` maps to accepted because CONTRIBUTING.md defines it that way: the finding
+# is good, and handled somewhere other than this pull request.
+FIRST_WORD = (("retenu", "accepted"), ("ecart", "rejected"),
+              ("partiel", "partial"), ("vu", "accepted"))
+
+
+def first_word(text):
+    """Lower-cased, accent-stripped, freed of markdown and trailing punctuation."""
+    stripped = unicodedata.normalize("NFD", (text or "").strip().lower())
+    stripped = "".join(c for c in stripped if not unicodedata.combining(c))
+    return re.split(r"[^a-z]+", stripped.lstrip("*_># \t-"), 1)[0]
+
+
 def first_hit(text, compiled):
     """Earliest match position of any pattern, or None."""
     positions = [m.start() for _n, rx in compiled for m in [rx.search(text)] if m]
@@ -179,6 +204,12 @@ def keyword_verdict(reply):
     text = normalise(reply)
     if not text:
         return "no_reply"
+
+    # An exact mandated label outranks everything below it.
+    word = first_word(reply)
+    for prefix, verdict in FIRST_WORD:
+        if word.startswith(prefix):
+            return verdict
 
     # Decide on the opening if anything decisive is there; earliest wins, so
     # "Écarté … le constat est exact" is a rejection and "Retenu … pas de
