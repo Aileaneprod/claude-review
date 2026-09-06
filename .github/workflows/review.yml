@@ -637,6 +637,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          VERDICT: ${{ steps.verdict.outputs.value }}
         run: |
           set -euo pipefail
 
@@ -655,21 +656,37 @@ jobs:
           fi
           case "$posted" in ''|*[!0-9]*) posted=0 ;; esac
 
-          if [ "$posted" -gt 0 ]; then
+          # This step now answers "no summary was posted", which is not the same
+          # as "the reviewer failed" — it also catches a review that finished
+          # and whose summary post-review.sh then declined, because what came
+          # back was the reviewer's next thought rather than a counts table.
+          # Saying "the reviewer step did not complete" in that branch would be
+          # a false statement, in the notice whose entire job is to stop this
+          # workflow claiming things that are not so.
+          if [ "$VERDICT" = completed ]; then
+            reason="The reviewer finished this push, but no summary could be recovered from it."
+            headline="AI review: no summary for this push"
+          elif [ "$posted" -gt 0 ]; then
+            reason="The reviewer stopped before finishing."
             headline="AI review stopped early — $posted finding(s) were posted first"
-            body="🤖 The AI review stopped before finishing, after posting $posted inline finding(s) on this push. Those comments are real and worth reading; what is missing is the summary, so any severity counts shown above are from an earlier run and are now out of date. This does not block merging."
           else
+            reason="The reviewer did not complete."
             headline="AI review unavailable"
-            body="🤖 AI review unavailable for this push — the reviewer step did not complete. This does not block merging."
+          fi
+
+          if [ "$posted" -gt 0 ]; then
+            body="🤖 $reason It had already posted $posted inline finding(s) on this push; those comments are real and worth reading. What is missing is the summary, so any severity counts shown above are from an earlier run and are now out of date. This does not block merging."
+          else
+            body="🤖 $reason No summary was posted for this push. This does not block merging."
           fi
 
           {
             echo "### $headline"
             echo
-            echo "The reviewer did not complete. This does **not** block the merge —"
+            echo "$reason This does **not** block the merge —"
             echo "review the changes yourself, and check the workflow logs if this repeats."
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "::warning title=${headline}::The reviewer step failed; merge is not blocked"
+          echo "::warning title=${headline}::No review summary was posted; merge is not blocked"
           gh pr comment "$PR_NUMBER" --body "$body" \
             || echo "Could not post the notice comment; the job summary above records it."
 
