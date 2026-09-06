@@ -8,6 +8,10 @@
 #   --repo OWNER/REPO  Repository whose pull request to harvest.
 #   --pr N             Pull request number.
 #   --out DIR          Where to write the ledger. Default: ../feedback
+#   --threads-file F   Read the GraphQL response from F instead of calling the
+#                      API. --rest-file F does the same for the REST call. Both
+#                      exist so the tests can exercise the verdict reader
+#                      against recorded replies; nothing in CI passes them.
 #
 # Writes feedback/<owner>/<repo>/<pr>.json: one record per review thread, with
 # the finding, the author's reply verbatim, whether the thread was resolved,
@@ -33,6 +37,8 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo=""
 pr_number=""
 out_dir="${script_dir}/../feedback"
+threads_file=""
+rest_file=""
 
 die() {
   printf 'harvest-feedback: %s\n' "$1" >&2
@@ -44,14 +50,16 @@ while [ "$#" -gt 0 ]; do
     --repo) [ "$#" -ge 2 ] || die "--repo requires a value"; repo="$2";      shift 2 ;;
     --pr)   [ "$#" -ge 2 ] || die "--pr requires a value";   pr_number="$2"; shift 2 ;;
     --out)  [ "$#" -ge 2 ] || die "--out requires a value";  out_dir="$2";   shift 2 ;;
-    -h|--help) sed -n '2,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --threads-file) [ "$#" -ge 2 ] || die "--threads-file requires a value"; threads_file="$2"; shift 2 ;;
+    --rest-file)    [ "$#" -ge 2 ] || die "--rest-file requires a value";    rest_file="$2";    shift 2 ;;
+    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 [ -n "$repo" ]      || die "--repo is required"
 [ -n "$pr_number" ] || die "--pr is required"
-command -v gh >/dev/null 2>&1      || die "gh is not installed"
+[ -n "$threads_file" ] || command -v gh >/dev/null 2>&1 || die "gh is not installed"
 command -v python3 >/dev/null 2>&1 || die "python3 is not installed"
 
 owner="${repo%%/*}"
@@ -69,6 +77,9 @@ trap cleanup EXIT
 # The query is deliberately single-quoted: $owner, $name and $pr are GraphQL
 # variables bound by -F, and must reach the server unexpanded. Letting the shell
 # interpolate them would send an empty, invalid query.
+if [ -n "$threads_file" ]; then
+  cp -- "$threads_file" "${work_dir}/threads.json"
+else
 gh api graphql -F owner="$owner" -F name="$name" -F pr="$pr_number" -f query='
 query($owner:String!, $name:String!, $pr:Int!) {
   repository(owner:$owner, name:$name) {
@@ -90,17 +101,24 @@ query($owner:String!, $name:String!, $pr:Int!) {
   }
 }' >"${work_dir}/threads.json" 2>"${work_dir}/threads.err" \
   || { sed 's/^/harvest-feedback:   /' "${work_dir}/threads.err" >&2; die "GraphQL query failed"; }
+fi
 
 # REST carries original_commit_id — the SHA the comment was anchored to, which
 # GraphQL does not expose on review threads.
-gh api "repos/${repo}/pulls/${pr_number}/comments" --paginate --slurp \
-  >"${work_dir}/rest.json" 2>/dev/null || printf '[]' >"${work_dir}/rest.json"
+if [ -n "$rest_file" ]; then
+  cp -- "$rest_file" "${work_dir}/rest.json"
+else
+  gh api "repos/${repo}/pulls/${pr_number}/comments" --paginate --slurp \
+    >"${work_dir}/rest.json" 2>/dev/null || printf '[]' >"${work_dir}/rest.json"
+fi
 
 mkdir -p "${out_dir}/${owner}/${name}"
 
 python3 - "${work_dir}/threads.json" "${work_dir}/rest.json" \
           "${out_dir}/${owner}/${name}/${pr_number}.json" "$repo" "$pr_number" <<'PY'
 import json
+import re
+import unicodedata
 import sys
 
 threads_path, rest_path, out_path, repo, pr = sys.argv[1:6]
@@ -126,6 +144,20 @@ def is_bot(login):
 
 # The author's own words are the label. Guess a verdict for convenience, but
 # always keep the raw text: the guess is a hint for a human, never a decision.
+#
+# THE FIRST WORD DECIDES. korbyx/CONTRIBUTING.md mandates one of four words at
+# the head of every reply — Retenu, Écarté, Partiel, Vu — and that rule exists
+# so this guess stops depending on a substring search over a whole sentence.
+# The search it replaces read "Retenu — le faux positif est sur le point
+# voisin" as a rejection: the exact inversion of what the author wrote. The
+# keyword lists below stay, as a fallback for the 148 replies written before
+# the vocabulary existed.
+#
+# `Vu` maps to accepted on purpose: CONTRIBUTING.md defines it as "le constat
+# est juste mais traité ailleurs", which is a true positive for precision. The
+# nuance is not lost — `human_reply` keeps the reply verbatim.
+FIRST_WORD = (("retenu", "accepted"), ("ecart", "rejected"), ("partiel", "partial"))
+
 ACCEPT = ("corrigé", "corrige", "fixed", "corrected", "appliqué", "applique",
           "le constat est exact", "le constat est juste", "good catch", "done")
 REJECT = ("écarté", "ecarte", "rejected", "declined", "not a", "faux positif",
@@ -133,7 +165,21 @@ REJECT = ("écarté", "ecarte", "rejected", "declined", "not a", "faux positif",
 PARTIAL = ("à moitié", "a moitie", "partiel", "partially", "en partie")
 
 
+def first_word(text):
+    """Lower-cased, accent-stripped, freed of the markdown CONTRIBUTING.md
+    itself uses (**Retenu**) and of the punctuation that always follows."""
+    stripped = unicodedata.normalize("NFD", (text or "").strip().lower())
+    stripped = "".join(c for c in stripped if not unicodedata.combining(c))
+    return re.split(r"[^a-z]+", stripped.lstrip("*_># 	-"), 1)[0]
+
+
 def guess(text):
+    word = first_word(text)
+    for prefix, verdict in FIRST_WORD:
+        if word.startswith(prefix):
+            return verdict
+    if word == "vu":
+        return "accepted"
     low = (text or "").lower()
     if any(k in low for k in PARTIAL):
         return "partial"
