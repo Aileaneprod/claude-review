@@ -107,6 +107,15 @@ classifies those heuristically for the scoreboard, but `human_reply` always
 keeps the raw text, because the guess is a hint for a human and never a
 decision.
 
+The heuristic reads the **first word** before falling back to a keyword search,
+so a repository that asks its authors to open every reply with one word gets an
+exact label instead of a guess. `Aileaneprod/korbyx` mandates four — *Retenu*,
+*Écarté*, *Partiel*, *Vu* — after 46 of its 148 verdicts had to be re-read by
+hand. Without that rule the search runs over the whole reply, and *"Retenu — le
+faux positif est sur le point voisin"* scores as a rejection. Ask for the word;
+it costs the author nothing and it is the only thing that makes the scoreboard
+countable.
+
 ### Keeping memory from becoming bloat
 
 Every line is read on every review, so it costs quota and competes for attention

@@ -1,0 +1,214 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "title": "KOR-999 : jeu d'essai des verdicts",
+        "state": "OPEN",
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "a.ts",
+              "line": 10,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1001,
+                    "author": {
+                      "login": "claude"
+                    },
+                    "body": "🔴 **Blocking** — la garde manque.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1002,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "**Retenu**.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "b.ts",
+              "line": 20,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1003,
+                    "author": {
+                      "login": "coderabbitai"
+                    },
+                    "body": "🟠 Important — le contrôle est ailleurs.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1004,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Vu — le même contrôle vit dans KOR-300.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "c.ts",
+              "line": 30,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1005,
+                    "author": {
+                      "login": "claude"
+                    },
+                    "body": "🟠 Important — deux points dans un commentaire.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1006,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Retenu — le faux positif est sur le point voisin, pas ici.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "d.ts",
+              "line": 40,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1007,
+                    "author": {
+                      "login": "claude"
+                    },
+                    "body": "🟡 Nit — renommer la variable.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1008,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Écarté : le POC n'exerce pas ce chemin.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "e.ts",
+              "line": 50,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1009,
+                    "author": {
+                      "login": "claude"
+                    },
+                    "body": "🟠 Important — garde sans preuve.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1010,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Partiel, la garde est posée, le test manque.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "f.ts",
+              "line": 60,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1011,
+                    "author": {
+                      "login": "claude"
+                    },
+                    "body": "🟡 Nit — commentaire obsolète.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1012,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Ecarté, hors périmètre.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "g.ts",
+              "line": 70,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1013,
+                    "author": {
+                      "login": "claude"
+                    },
+                    "body": "🟠 Important — personne n'a répondu.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "h.ts",
+              "line": 80,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 1015,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Question d'un humain, pas un constat de relecteur.",
+                    "createdAt": "2026-09-01T10:00:00Z"
+                  },
+                  {
+                    "databaseId": 1016,
+                    "author": {
+                      "login": "jdfyras"
+                    },
+                    "body": "Réponse.",
+                    "createdAt": "2026-09-01T11:00:00Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
