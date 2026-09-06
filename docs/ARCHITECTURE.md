@@ -245,13 +245,44 @@ Consequences:
 
 ## Failure is always non-blocking
 
-The review step is `continue-on-error: true`. If it fails, a later step posts a
-short "review unavailable" note and the job still exits 0.
+The review step is `continue-on-error: true`. If nothing gets posted, a later
+step posts a short note saying so and the job still exits 0.
 
-Success is read from `steps.claude.outcome`. The action sets a `conclusion`
-output internally but does not declare it, and composite actions only surface
-declared outputs — so `steps.claude.outputs.conclusion` reads empty. That is a
-trap worth remembering.
+Two separate questions decide what the author is told, and neither is the
+reviewer step's exit code.
+
+**Did the reviewer finish?** `classify-run.sh` reads the last `result` record
+out of the execution file and requires `subtype == "success"` with `is_error`
+exactly `False`. The `Classify the review outcome` step writes `unavailable` to
+disk before calling it, so anything unestablished stays unestablished.
+
+**Did a comment actually land?** Only `post-review.sh` knows, and it says so in
+`--posted-out`. The notice fires on `!= 'true'`, so a skipped step, a crashed
+step and a deliberate "nothing worth posting" all reach the author.
+
+This used to be one question — `steps.claude.outcome` — asked twice, and the
+answer stopped meaning what both readers assumed. `claude-code-action` checks
+`num_turns` after the run and fails the step when it overran `--max-turns`,
+even when the CLI reported success. On Aileaneprod/korbyx#110, run 34058925818,
+a review that had finished (`terminal_reason: completed`, 43 turns, $0.87) was
+announced as "AI review unavailable" and discarded.
+
+Do not fold the two back together. The action writes the execution file about
+9 ms before it flushes buffered inline comments, so nothing in that file can
+witness whether the findings reached GitHub — "the reviewer finished" and "the
+author can see it" are genuinely different facts. Two conditions derived from
+one signal also drift: they can both speak, or both stay silent.
+
+Known limitation: if that flush step itself fails, the reviewer will have
+finished, `post-review.sh` will post a summary with counts, and the inline
+comments those counts refer to will not be on the diff. Nothing currently
+detects it. Cross-checking the live review comments against the transcript
+would, and is not built.
+
+`steps.claude.outputs.conclusion` reads empty, whatever the action does
+internally: it sets a `conclusion` output but does not declare it, and
+composite actions only surface declared outputs. That is a trap worth
+remembering even though nothing depends on it now.
 
 `fail_on_blocking` is opt-in and off by default.
 
