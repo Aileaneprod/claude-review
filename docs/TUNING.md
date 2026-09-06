@@ -163,7 +163,7 @@ that drifts from CI as a local-environment artefact until CI agrees.
 | Wrong findings on one stack | Edit that `prompts/profiles/*.md`, not `base.md` |
 | Flags things a linter owns | Add the linter to grounding rule 5 |
 | Misses a defect class you care about | Add it to the matching profile, then add a fixture |
-| Reviews cost too much | Lower `max_turns` (20 → 12). Fewer turns means less file-reading, so expect precision to drop |
+| Reviews cost too much | Lower `max_turns` (60 → 30). Fewer turns means less file-reading, so expect precision to drop |
 | Huge PRs get shallow reviews | Raise `max_diff_lines`, or accept triage mode |
 
 Set these in `config/defaults.yml` for everywhere, or `.claude-review.yml` for

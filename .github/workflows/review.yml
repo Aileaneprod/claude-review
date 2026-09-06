@@ -479,7 +479,7 @@ jobs:
         run: |
           set -euo pipefail
           model="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$RUNNER_TEMP/config.json")"
-          turns="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("max_turns",20))' "$RUNNER_TEMP/config.json")"
+          turns="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("max_turns",60))' "$RUNNER_TEMP/config.json")"
 
           # Read and comment only. No Edit, no Write, no unrestricted Bash — the
           # reviewer must never be able to modify the code it is reviewing.
@@ -533,8 +533,9 @@ jobs:
         # posts and the author learns the review did not happen. A job timeout
         # would cancel every later step and the PR would hear nothing.
         # Measured on 200 runs: median 168 s, p90 300 s; three runs on
-        # 2026-08-28 hung for ~2h55 with no timeout to stop them. 40 turns at
-        # ~20 s each is ~15 min at worst, so 30 leaves headroom.
+        # 2026-08-28 hung for ~2h55 with no timeout to stop them. 60 turns at
+        # the measured 7.3 s each is ~7 min, and ~20 min even at a pessimistic
+        # 20 s, so 30 still leaves headroom.
         timeout-minutes: 30
         uses: anthropics/claude-code-action@v1
         with:
