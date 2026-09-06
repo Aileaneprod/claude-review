@@ -80,12 +80,22 @@ if not isinstance(messages, list):
 
 
 def content_blocks(message):
-    """The SDK nests content under `message` on some records and not others."""
+    """The SDK nests content under `message` on some records and not others.
+
+    And on one record it is neither: the `system`/`init` line that opens every
+    execution file carries `"message": "Claude Code initialized"`, a plain
+    string. `(message.get("message") or {})` let that string through the `or`
+    and the following `.get` raised AttributeError on the first record of every
+    real run — so this diagnostic died before printing the finding count, on
+    every invocation, unnoticed because the workflow calls it with `|| true`.
+    Check the type; do not lean on truthiness to stand in for it.
+    """
     if not isinstance(message, dict):
         return []
     content = message.get("content")
     if content is None:
-        content = (message.get("message") or {}).get("content")
+        nested = message.get("message")
+        content = nested.get("content") if isinstance(nested, dict) else None
     return content if isinstance(content, list) else []
 
 
