@@ -106,3 +106,13 @@ rm -f "$TESTTMP/pr-posted"
   --posted-out "$TESTTMP/pr-posted" >/dev/null 2>&1 || true
 assert_equal "false" "$(cat "$TESTTMP/pr-posted" 2>/dev/null || echo MISSING)" \
   "an execution file that is not there still answers the question"
+
+# --- the emoji have to be in the table -------------------------------------
+
+it "does not accept a sentence that merely names the three severities"
+# Raised on the pull request that introduced the check: three emoji anywhere in
+# the text passed it, and "J'ai releve des points 🔴, 🟠 et 🟡 ; je continue"
+# is exactly the kind of sentence a run ends on. The counts table is a table.
+_setup
+assert_equal "false" "$(_posted summary-emoji-prose.json)" "prose is not a counts table"
+assert_not_contains "--method" "the previous summary is left standing" -- _calls
