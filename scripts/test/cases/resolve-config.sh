@@ -67,3 +67,38 @@ _lang_value() {
 }
 assert_equal "français" "$(_lang_value 'français')" "français survives resolution"
 assert_equal "中文" "$(_lang_value '中文')" "中文 survives resolution"
+
+# --- precedence: who actually wins ------------------------------------------
+# docs/TUNING.md tells people to set config/defaults.yml "for everywhere". That
+# was not true for five keys: review.yml gave its inputs non-empty defaults,
+# GitHub substitutes an omitted input's default, and overrides beat defaults.yml
+# — so profile, max_turns, max_findings, max_diff_lines and fail_on_blocking
+# were read from the workflow and never from the file the docs point at. Two
+# sources of truth kept in step by a comment.
+
+_ov() {
+  local json="$1" dir="$TESTTMP/ov"
+  mkdir -p "$dir"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write(sys.argv[2])
+" "$dir/overrides.json" "$json"
+  printf '%s' "$dir/overrides.json"
+}
+_resolved() {
+  "$SCRIPTS/resolve-config.sh" --overrides "$(_ov "$1")"     | python3 -c "import json,sys; print(json.load(sys.stdin)[sys.argv[1]])" "$2"
+}
+
+it "reads config/defaults.yml when the workflow passes nothing"
+# This is the case that matters: a caller that sets no inputs must get the
+# central file, which is the whole point of a central file.
+assert_equal "40"   "$(_resolved '{}' max_turns)"      "max_turns comes from defaults.yml"
+assert_equal "12"   "$(_resolved '{}' max_findings)"   "max_findings comes from defaults.yml"
+assert_equal "2000" "$(_resolved '{}' max_diff_lines)" "max_diff_lines comes from defaults.yml"
+assert_equal "auto" "$(_resolved '{}' profile)"        "profile comes from defaults.yml"
+assert_equal "False" "$(_resolved '{}' fail_on_blocking)" "fail_on_blocking comes from defaults.yml"
+
+it "still lets a caller that DOES pass an input win"
+assert_equal "12" "$(_resolved '{"max_turns": 12}' max_turns)" "an explicit input overrides the file"
+assert_equal "generic" "$(_resolved '{"profile": "generic"}' profile)" "an explicit profile overrides"
+assert_equal "True" "$(_resolved '{"fail_on_blocking": true}' fail_on_blocking)" "an explicit flag overrides"

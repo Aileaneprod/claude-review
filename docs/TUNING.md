@@ -169,6 +169,18 @@ that drifts from CI as a local-environment artefact until CI agrees.
 Set these in `config/defaults.yml` for everywhere, or `.claude-review.yml` for
 one repo. Precedence: `defaults.yml` < workflow inputs < the repo's own file.
 
+That sentence was false for five keys until it was tested. `review.yml` gave
+`profile`, `max_turns`, `max_findings`, `max_diff_lines` and `fail_on_blocking`
+non-empty defaults; GitHub substitutes an omitted input's default, so those
+values were always present in the overrides and always beat the central file.
+Editing `config/defaults.yml` did nothing, and the two copies were kept in step
+by a comment saying they must match.
+
+**So the rule now is: an input that mirrors a config key defaults to empty.**
+The value lives in `config/defaults.yml`, once.
+`scripts/test/cases/collect-inputs.sh` reads `review.yml` and fails if a new
+input breaks it — a comment could not enforce this, and did not.
+
 ## Choosing a model
 
 `model` is empty by default, which lets `claude-code-action` use its own

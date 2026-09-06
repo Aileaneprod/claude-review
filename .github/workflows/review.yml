@@ -10,9 +10,14 @@ on:
   workflow_call:
     inputs:
       profile:
-        description: "Prompt profile, or 'auto' to detect from repo contents."
+        description: >-
+          Prompt profile, or 'auto' to detect from repo contents.
+          The value lives in config/defaults.yml. This defaults to EMPTY on
+          purpose: GitHub substitutes an omitted input's default, and anything
+          this workflow emits shadows the central file — so a default here
+          would mean config/defaults.yml is never read for this key.
         type: string
-        default: auto
+        default: ""
       model:
         description: >-
           Model ID. Empty means let claude-code-action pick its own default,
@@ -21,24 +26,32 @@ on:
         type: string
         default: ""
       max_turns:
-        description: "Agentic turn budget for a single review."
-        type: number
-        # MUST match config/defaults.yml. GitHub substitutes an input's default
-        # whenever the caller omits it, so this value is always present in the
-        # overrides JSON — and overrides beat config/defaults.yml. For every
-        # input with a non-empty default, the number here is the one that
-        # actually applies and the one in defaults.yml is never consulted.
-        # Measured: 20 killed reviews on two repositories with `error_max_turns`
-        # at full cost and no output. See config/defaults.yml for the evidence.
-        default: 40
+        description: >-
+          Agentic turn budget for a single review.
+          The value lives in config/defaults.yml. This defaults to EMPTY on
+          purpose: GitHub substitutes an omitted input's default, and anything
+          this workflow emits shadows the central file — so a default here
+          would mean config/defaults.yml is never read for this key.
+        type: string
+        default: ""
       max_findings:
-        description: "Hard cap on inline comments per review."
-        type: number
-        default: 12
+        description: >-
+          Hard cap on inline comments per review.
+          The value lives in config/defaults.yml. This defaults to EMPTY on
+          purpose: GitHub substitutes an omitted input's default, and anything
+          this workflow emits shadows the central file — so a default here
+          would mean config/defaults.yml is never read for this key.
+        type: string
+        default: ""
       max_diff_lines:
-        description: "Above this many changed lines, degrade to triage mode."
-        type: number
-        default: 2000
+        description: >-
+          Above this many changed lines, degrade to triage mode.
+          The value lives in config/defaults.yml. This defaults to EMPTY on
+          purpose: GitHub substitutes an omitted input's default, and anything
+          this workflow emits shadows the central file — so a default here
+          would mean config/defaults.yml is never read for this key.
+        type: string
+        default: ""
       exclude_paths:
         description: "Newline-separated globs to exclude. Replaces the defaults."
         type: string
@@ -50,9 +63,14 @@ on:
         type: string
         default: ""
       fail_on_blocking:
-        description: "Fail the check run when a blocking finding exists."
-        type: boolean
-        default: false
+        description: >-
+          Fail the check run when a blocking finding exists. "true" or "false".
+          The value lives in config/defaults.yml. This defaults to EMPTY on
+          purpose: GitHub substitutes an omitted input's default, and anything
+          this workflow emits shadows the central file — so a default here
+          would mean config/defaults.yml is never read for this key.
+        type: string
+        default: ""
       tooling_ref:
         description: >-
           Git ref of claude-review to load scripts and prompts from. Must match
@@ -218,40 +236,11 @@ jobs:
           IN_FAIL_ON_BLOCKING: ${{ inputs.fail_on_blocking }}
         run: |
           set -euo pipefail
-          # Inputs reach python through the environment, never through string
-          # interpolation into code.
-          python3 <<'PY' > "$RUNNER_TEMP/overrides.json"
-          import json
-          import os
-
-          out = {}
-          if os.environ.get("IN_PROFILE"):
-              out["profile"] = os.environ["IN_PROFILE"]
-          if os.environ.get("IN_MODEL"):
-              out["model"] = os.environ["IN_MODEL"]
-          if os.environ.get("IN_LANGUAGE"):
-              out["language"] = os.environ["IN_LANGUAGE"]
-          for key, name in (
-              ("IN_MAX_TURNS", "max_turns"),
-              ("IN_MAX_FINDINGS", "max_findings"),
-              ("IN_MAX_DIFF_LINES", "max_diff_lines"),
-          ):
-              value = os.environ.get(key, "").strip()
-              if value:
-                  out[name] = int(float(value))
-          flag = os.environ.get("IN_FAIL_ON_BLOCKING", "").strip().lower()
-          if flag in ("true", "false"):
-              out["fail_on_blocking"] = flag == "true"
-          globs = [
-              line.strip()
-              for line in os.environ.get("IN_EXCLUDE_PATHS", "").splitlines()
-              if line.strip()
-          ]
-          if globs:
-              out["exclude_paths"] = globs
-
-          print(json.dumps(out))
-          PY
+          # Inputs reach the script through the environment, never through
+          # string interpolation into code. Only non-empty values are emitted,
+          # so an input the caller omitted leaves config/defaults.yml in charge.
+          .claude-review-tooling/scripts/collect-inputs.sh \
+            --out "$RUNNER_TEMP/overrides.json"
           printf 'Workflow input overrides: %s\n' "$(cat "$RUNNER_TEMP/overrides.json")"
 
       - name: Resolve configuration
