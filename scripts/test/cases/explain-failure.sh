@@ -61,8 +61,35 @@ assert_contains "ran out of turns" "error_max_turns is explained" -- _exec denia
 it "writes the posted count to --count-out"
 _count() {
   local out="$TESTTMP/count"
+  # Remove it first: this helper used to read whatever the previous case left
+  # behind, so a run that wrote nothing at all could still be scored against a
+  # stale value from the case before it.
+  rm -f "$out"
   "$SCRIPTS/explain-failure.sh" --execution-file "$FIXTURES/$1" --count-out "$out" >/dev/null 2>&1
-  cat "$out"
+  cat "$out" 2>/dev/null || echo "(no count file written)"
 }
 assert_equal "1" "$(_count posted-one-succeeded-one-failed.json)" "count-out reflects successful posts only"
 assert_equal "0" "$(_count malformed.json)" "count-out is 0 for an unreadable file"
+
+# --- the record every real run carries ---------------------------------------
+#
+# `{"type":"system","subtype":"init","message":"Claude Code initialized"}` opens
+# EVERY execution file the action writes. Its `message` is a plain string, and
+# `content_blocks` did `(message.get("message") or {}).get("content")` — so the
+# string survived the `or` and the `.get` raised AttributeError on the very
+# first record of every run.
+#
+# The consequence was invisible because the workflow calls this script with
+# `|| true`: the diagnostic printed its header rows, died before the count, and
+# never wrote --count-out. The notice therefore read `posted=0` and said "AI
+# review unavailable" on runs that had posted real findings. The "stopped early,
+# N findings were posted first" branch had never once been reached in production.
+#
+# Every fixture above builds `message` as a dict, which is exactly the shape the
+# crash needed to be absent.
+
+it "survives the system init record that opens every real execution file"
+assert_status 0 "a string-valued message field does not crash the diagnostic" -- _exec system-init-record.json
+assert_contains "findings posted    1" "the count is still reached and correct" -- _exec system-init-record.json
+assert_contains "Bash x1" "denials are still reported" -- _exec system-init-record.json
+assert_equal "1" "$(_count system-init-record.json)" "--count-out is written despite the init record"
