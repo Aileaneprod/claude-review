@@ -1,7 +1,17 @@
 # Default configuration for claude-review.
 #
-# A repo may override any of these by adding a `.claude-review.yml` at its root;
-# repo values win. See templates/.claude-review.yml for a documented example.
+# THIS FILE IS THE SOURCE OF TRUTH for every key in it. Precedence:
+#
+#     config/defaults.yml  <  workflow inputs  <  the repo's .claude-review.yml
+#
+# A repo overrides any of these with a `.claude-review.yml` at its root; repo
+# values win. See templates/.claude-review.yml for a documented example.
+#
+# Do not copy a value here into a `default:` in review.yml's inputs. GitHub
+# substitutes an omitted input's default, so an input carrying one shadows this
+# file permanently — which is what happened to five of these keys, while
+# docs/TUNING.md told people to edit here. Inputs that mirror a key below
+# default to empty, and scripts/test/cases/collect-inputs.sh enforces it.
 #
 # IMPORTANT — this file is parsed by a deliberately small YAML reader (see
 # scripts/resolve-config.sh). Only two shapes are supported:
