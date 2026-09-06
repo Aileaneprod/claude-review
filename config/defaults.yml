@@ -37,22 +37,40 @@ model: ""
 
 # Maximum agentic turns for a single review. The main lever on cost per review.
 #
-# 40, not 20, and the difference is measured rather than guessed. A review that
-# runs out of turns costs the same as one that finishes and delivers nothing:
-# the action reports `error_max_turns` and the workflow posts "review
-# unavailable". Two independent repositories hit it at 20:
+# It is a CEILING, not a target. A review that finishes in 24 turns costs 24
+# turns whatever this says, and the number never reaches the model — it becomes
+# `--max-turns` on the CLI and nothing else. Raising it costs nothing except on
+# the runs that would otherwise have been cut off.
 #
-#   * Aileaneprod/korbyx, four reviews on one PR: two died at 20 turns for
-#     $0.86 and $1.03 with nothing posted. That repo raised max_turns to 40 in
-#     its own .claude-review.yml and has not hit the ceiling since.
-#   * This repository's own first self-review (PR #1): `error_max_turns` at 21
-#     turns, $0.74, nothing posted.
+# Being cut off is expensive, and it is expensive twice over:
+#
+#   * a review that stops at the ceiling costs the same as one that finishes
+#     and delivers nothing — `error_max_turns`, and the author gets a notice.
+#   * a review that FINISHES past the ceiling is also thrown away. The action
+#     checks `num_turns` after the run and fails the step even when the CLI
+#     reported success. Aileaneprod/korbyx#110, run 34058925818: subtype
+#     success, terminal_reason completed, 43 turns, $0.87, announced as "AI
+#     review unavailable". classify-run.sh now rescues that case, but the
+#     honest answer is to stop provoking it.
+#
+# Measured history, all of it evidence rather than guesswork:
+#
+#   * 20 killed reviews on two independent repositories. Aileaneprod/korbyx,
+#     four reviews on one PR: two died at 20 turns for $0.86 and $1.03 with
+#     nothing posted. This repository's own first self-review (PR #1):
+#     `error_max_turns` at 21 turns, $0.74, nothing posted.
+#   * 40 held for a while and then stopped holding. korbyx#110 reported 43,
+#     the first review to run with the Linear ticket in its prompt — a longer
+#     prompt and one more file to read.
 #
 # A turn is mostly one file read, and a real review reads the changed files plus
-# the conventions around them — AGENTS.md, the ADRs, the config the change
-# touches — before it can conclude anything. 20 does not cover that. Lower this
-# if quota gets tight, knowing exactly what it buys and what it risks.
-max_turns: 40
+# the conventions around them — AGENTS.md, the ADRs, the ticket, the config the
+# change touches — before it can conclude anything. 60 is chosen for headroom
+# over the 43 that has actually been seen, not calculated. At the measured 7.3 s
+# per turn it is about 7 minutes; even at a pessimistic 20 s it stays inside the
+# reviewer step's 30-minute timeout. Lower it if quota gets tight, knowing
+# exactly what it buys and what it risks.
+max_turns: 60
 
 # Hard cap on inline comments per review. Beyond this the reviewer keeps the
 # highest-severity findings and says how many it dropped.

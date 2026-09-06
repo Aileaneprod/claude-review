@@ -24,8 +24,14 @@ model: ""
 # Turn budget for a single review. Lower is cheaper and shallower — but a review
 # that runs out of turns costs the same as one that finishes and delivers
 # nothing, so do not trim this without reading the evidence in
-# config/defaults.yml. 20 killed reviews on two separate repositories.
-max_turns: 40
+# config/defaults.yml. 20 killed reviews on two separate repositories, and 40
+# was overrun by the first review that read a linked ticket.
+#
+# Setting it here at all is a choice worth making deliberately: this file BEATS
+# config/defaults.yml, so whatever number you leave here is the number you get
+# forever, and a later fix to the central default will not reach you. Delete
+# the line to track the default instead.
+max_turns: 60
 
 # Maximum inline comments per review. Lower this on repos where reviews feel
 # noisy; the reviewer keeps the highest-severity findings and reports the rest

@@ -92,7 +92,7 @@ _resolved() {
 it "reads config/defaults.yml when the workflow passes nothing"
 # This is the case that matters: a caller that sets no inputs must get the
 # central file, which is the whole point of a central file.
-assert_equal "40"   "$(_resolved '{}' max_turns)"      "max_turns comes from defaults.yml"
+assert_equal "60"   "$(_resolved '{}' max_turns)"      "max_turns comes from defaults.yml"
 assert_equal "12"   "$(_resolved '{}' max_findings)"   "max_findings comes from defaults.yml"
 assert_equal "2000" "$(_resolved '{}' max_diff_lines)" "max_diff_lines comes from defaults.yml"
 assert_equal "auto" "$(_resolved '{}' profile)"        "profile comes from defaults.yml"
