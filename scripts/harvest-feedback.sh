@@ -244,9 +244,23 @@ for thread in pr_node["reviewThreads"]["nodes"]:
 # writes the marker below and owns that comment; nothing else emits it.
 SUMMARY_MARKER = "<!-- claude-review:summary -->"
 
+# And it has to have been posted BY us. The marker is a plain string in a public
+# comment thread: anybody can type it, and the people most likely to are the ones
+# discussing this tool — the pull request that introduced this check quotes the
+# marker three times in its own body. A presence flag that a passer-by can set is
+# not evidence, and it inflates the one number the whole ledger exists to answer.
+#
+# These two logins are the only accounts post-review.sh can run as: the Claude
+# GitHub App when `use_github_app` is true, and the workflow's own token
+# otherwise. Both end in `[bot]`, which GitHub does not allow in a human login.
+OUR_POSTERS = ("claude[bot]", "github-actions[bot]")
+
 our_summary_at = None
 for comment in ((pr_node.get("comments") or {}).get("nodes") or []):
     if not isinstance(comment, dict):
+        continue
+    login = ((comment.get("author") or {}).get("login") or "").lower()
+    if login not in OUR_POSTERS:
         continue
     if SUMMARY_MARKER in (comment.get("body") or ""):
         # The sticky is upserted in place, so there is normally exactly one.
