@@ -251,10 +251,29 @@ SUMMARY_MARKER = "<!-- claude-review:summary -->"
 # marker three times in its own body. A presence flag that a passer-by can set is
 # not evidence, and it inflates the one number the whole ledger exists to answer.
 #
-# These two logins are the only accounts post-review.sh can run as: the Claude
+# These two accounts are the only ones post-review.sh can run as: the Claude
 # GitHub App when `use_github_app` is true, and the workflow's own token
-# otherwise. Both end in `[bot]`, which GitHub does not allow in a human login.
-OUR_POSTERS = ("claude[bot]", "github-actions[bot]")
+# otherwise.
+#
+# Compared WITHOUT the `[bot]` suffix, because the two GitHub APIs disagree about
+# it and this file reads the one that omits it. Measured on korbyx#92:
+#
+#     GraphQL  author.login = "github-actions"        __typename = Bot
+#     REST     user.login   = "github-actions[bot]"   type       = Bot
+#
+# The first version of this guard compared against the REST spelling and rejected
+# every real summary — 116 documents harvested, zero presence recorded — while
+# its test passed, because the fixture had been "corrected" to the REST spelling
+# at the same time. Fixture and code were wrong together, which is the failure
+# this repository keeps writing down.
+OUR_POSTERS = ("claude", "github-actions")
+
+
+def posted_by_us(author):
+    login = ((author or {}).get("login") or "").lower()
+    if login.endswith("[bot]"):
+        login = login[:-len("[bot]")]
+    return login in OUR_POSTERS
 
 # One page is read, and the busiest pull request on the repository this serves
 # carries 16 comments — so this is a bound, not a live problem. It is reported
@@ -274,8 +293,7 @@ our_summary_at = None
 for comment in seen_comments:
     if not isinstance(comment, dict):
         continue
-    login = ((comment.get("author") or {}).get("login") or "").lower()
-    if login not in OUR_POSTERS:
+    if not posted_by_us(comment.get("author")):
         continue
     if SUMMARY_MARKER in (comment.get("body") or ""):
         # The sticky is upserted in place, so there is normally exactly one.
