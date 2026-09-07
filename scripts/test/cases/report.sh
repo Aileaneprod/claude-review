@@ -76,6 +76,10 @@ assert_contains "n/a" "no judged findings yields n/a, not 0.00" -- _report
 
 # --- the criterion that decides ----------------------------------------------
 
+# These fixtures hold one pull request, so the verdict column reads `not yet`
+# rather than `PASS`: what they assert is the COUNT, which is what the miss
+# heuristic gets right or wrong. A window this small cannot earn a pass.
+
 it "counts a blocking finding only they caught as a miss"
 python3 -c "
 import json
@@ -100,7 +104,7 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🟠 Important — ours', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 0 | PASS |" "not a miss when we reviewed too" -- _report
+assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "not a miss when we reviewed too" -- _report
 
 it "does not count a rejected blocking finding of theirs as a miss"
 python3 -c "
@@ -110,7 +114,7 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🔴 Blocking — wrong', 'author_reply': 'Écarté',
                                 'verdict_keyword': 'rejected'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 0 | PASS |" "a rejected blocking is not a miss" -- _report
+assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "a rejected blocking is not a miss" -- _report
 
 # --- verdict precedence -------------------------------------------------------
 
@@ -156,3 +160,36 @@ assert_contains "Window: 1 pull request(s) from #99" "--since narrows the window
 it "writes to --out when asked"
 assert_status 0 "writes a file" -- _report --out "$TESTTMP/REPORT.md"
 assert_contains "Can we switch coderabbitai off?" "the file has the report" -- cat "$TESTTMP/REPORT.md"
+
+# --- a verdict has to be earned ----------------------------------------------
+
+it "never reads PASS on a window too small to have measured anything"
+# Freezing the measurement window to start clean made this urgent: on an empty
+# window the table printed `| Blocking findings only they caught | 0 | 0 | PASS |`
+# — the criterion that decides whether CodeRabbit gets switched off, reading
+# green because nothing had been measured at all. Zero misses over one pull
+# request is the absence of evidence, not evidence of absence.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                                'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'},
+                               {'reviewer': 'coderabbitai', 'path': 'b.ts', 'line': 2,
+                                'finding': '🟠 Important — y', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "no misses on one PR is not a pass" -- _report
+assert_contains "| Our precision on judged findings | >= 0.95 | 1.00 | not yet |" "a perfect score on one PR is not a pass either" -- _report
+
+it "still reports a miss it actually saw, however small the window"
+# The asymmetry is deliberate. A blocking finding we missed is a positive
+# observation and counts from the first one.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL |" "one observed miss still fails" -- _report
