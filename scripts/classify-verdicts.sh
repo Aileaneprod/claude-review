@@ -63,7 +63,7 @@ while [ "$#" -gt 0 ]; do
     --min-agreement)  [ "$#" -ge 2 ] || die "--min-agreement requires a value"; min_agreement="$2"; shift 2 ;;
     --model)          [ "$#" -ge 2 ] || die "--model requires a value";   model="$2";          shift 2 ;;
     --response-file)  [ "$#" -ge 2 ] || die "--response-file requires a value"; response_file="$2"; shift 2 ;;
-    -h|--help)        sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done

@@ -49,3 +49,33 @@ while IFS= read -r line; do
 done <<EOF
 $(_modes)
 EOF
+
+# --- --help must print the whole header, and only the header -----------------
+#
+# Every script serves --help by printing a fixed line range of itself:
+#
+#     -h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ...
+#
+# That number is a second statement of where the header ends, and it drifts the
+# moment anyone adds or removes a line above it. Nothing notices, because the
+# output still looks like help.
+#
+# Eight of the twelve scripts had drifted when this case was written. Some cut
+# off mid-sentence — report.sh ended on "which the workflow" — and some ran past
+# the comment block into the code, so `classify-run.sh --help` printed
+# `set -euo pipefail` at the reader. The drift that prompted this was four lines
+# added to report.sh's header in the same commit, and its own reviewer caught a
+# neighbouring symptom rather than the cause.
+
+it "serves --help from a window that matches the header block"
+_help_windows() {
+  local f win last
+  for f in "$SCRIPTS"/*.sh; do
+    win="$(grep -oE "sed -n '2,[0-9]+p'" "$f" | head -1 | sed -E "s/.*2,([0-9]+)p.*/\1/")"
+    [ -n "$win" ] || continue
+    last="$(awk 'NR==1{next} /^#/{l=NR;next} {exit} END{print l}' "$f")"
+    [ "$win" = "$last" ] || printf '%s: window ends at %s, header ends at %s\n' \
+      "$(basename "$f")" "$win" "$last"
+  done
+}
+assert_equal "" "$(_help_windows)" "no --help window truncates its header or spills into code"

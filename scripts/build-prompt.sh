@@ -61,7 +61,7 @@ while [ "$#" -gt 0 ]; do
     --repo-root)      [ "$#" -ge 2 ] || die "--repo-root requires a value";      repo_root="$2";      shift 2 ;;
     --out)            [ "$#" -ge 2 ] || die "--out requires a value";            out_file="$2";       shift 2 ;;
     --triage)         triage=1; shift ;;
-    -h|--help)        sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done

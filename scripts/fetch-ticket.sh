@@ -52,7 +52,7 @@ while [ "$#" -gt 0 ]; do
     --branch)        [ "$#" -ge 2 ] || die "--branch requires a value";        head_branch="$2";   shift 2 ;;
     --response-file) [ "$#" -ge 2 ] || die "--response-file requires a value"; response_file="$2"; shift 2 ;;
     --max-bytes)     [ "$#" -ge 2 ] || die "--max-bytes requires a value";     max_bytes="$2";     shift 2 ;;
-    -h|--help)       sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)       sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done

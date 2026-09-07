@@ -39,7 +39,7 @@ die() { printf 'collect-inputs: %s\n' "$1" >&2; exit 1; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --out) [ "$#" -ge 2 ] || die "--out requires a value"; out_file="$2"; shift 2 ;;
-    -h|--help) sed -n '2,30p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done

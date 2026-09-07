@@ -67,7 +67,7 @@ while [ "$#" -gt 0 ]; do
     --body-file)      [ "$#" -ge 2 ] || die "--body-file requires a value";      body_file="$2";      shift 2 ;;
     --posted-out)     [ "$#" -ge 2 ] || die "--posted-out requires a value";     posted_out="$2";     shift 2 ;;
     --dry-run)        dry_run=1; shift ;;
-    -h|--help)        sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done
