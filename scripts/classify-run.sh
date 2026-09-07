@@ -52,7 +52,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --execution-file) [ "$#" -ge 2 ] || die "--execution-file requires a value"; execution_file="$2"; shift 2 ;;
     --verdict-out)    [ "$#" -ge 2 ] || die "--verdict-out requires a value";    verdict_out="$2";    shift 2 ;;
-    -h|--help)        sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done

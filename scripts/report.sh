@@ -15,9 +15,13 @@
 #
 # The exit criterion this serves, decided before any of it was measured:
 #
-#   On at least MIN_BOTH pull requests reviewed by both, ZERO author-confirmed blocking
-#   findings that they raised and we did not, and our precision >= 0.95 on
-#   findings the author actually judged.
+#   On a large enough window of pull requests reviewed by both, ZERO
+#   author-confirmed blocking findings that they raised and we did not, and our
+#   precision >= 0.95 on findings the author actually judged.
+#
+#   "Large enough" is a real threshold, not a hedge: the report's own table
+#   prints it in the target column and says whether it has been reached, so the
+#   number lives in exactly one place and this text cannot drift from it.
 #
 # Two honesties the numbers depend on:
 #
@@ -51,7 +55,7 @@ while [ "$#" -gt 0 ]; do
     --theirs) [ "$#" -ge 2 ] || die "--theirs requires a value"; theirs="$2";     shift 2 ;;
     --since)  [ "$#" -ge 2 ] || die "--since requires a value";  since="$2";      shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
-    -h|--help) sed -n '2,36p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done

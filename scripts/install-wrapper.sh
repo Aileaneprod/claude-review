@@ -47,7 +47,7 @@ while [ "$#" -gt 0 ]; do
     --base)     [ "$#" -ge 2 ] || die "--base requires a value";     base_branch="$2"; shift 2 ;;
     --template) [ "$#" -ge 2 ] || die "--template requires a value"; template="$2";    shift 2 ;;
     --no-github-app) use_github_app=0; shift ;;
-    -h|--help)  sed -n '2,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*)         die "unknown option: $1" ;;
     *)
       [ -z "$target" ] || die "unexpected extra argument: $1"
