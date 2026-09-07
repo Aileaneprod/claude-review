@@ -138,3 +138,21 @@ print(d.get('reviewed_by_ours', 'ABSENT'))
 " "$(_out_dir)/test/repo/93.json"
 }
 assert_equal "False" "$(_silent_none)" "no marker, no claim that we were there"
+
+it "will not let anyone but our own poster claim we were there"
+# The marker is a plain string in a public comment thread. Anybody can type it,
+# and the people most likely to are the ones discussing this tool — the pull
+# request that added this check quotes it three times in its own body. A
+# presence flag a passer-by can set is not evidence.
+_impostor() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 94 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-marker-from-a-human.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(d.get('reviewed_by_ours','ABSENT'))
+" "$(_out_dir)/test/repo/94.json"
+}
+assert_equal "False" "$(_impostor)" "a human quoting the marker is not our review"

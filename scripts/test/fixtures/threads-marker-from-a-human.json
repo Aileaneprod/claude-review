@@ -2,16 +2,16 @@
  "data": {
   "repository": {
    "pullRequest": {
-    "title": "KOR-92 : un ADR que le relecteur a lu sans rien trouver",
+    "title": "KOR-94 : un humain cite le marqueur dans une discussion",
     "state": "MERGED",
     "comments": {
      "nodes": [
       {
        "author": {
-        "login": "github-actions[bot]"
+        "login": "jdfyras"
        },
        "createdAt": "2026-09-04T16:31:00Z",
-       "body": "<!-- claude-review:summary -->\n## Résumé\n\n| Severité | Compte |\n|---|---|\n| 🔴 Bloquant | 0 |\n| 🟠 Important | 0 |\n| 🟡 Suggestion | 0 |\n"
+       "body": "On garde le marqueur `<!-- claude-review:summary -->` pour que post-review.sh retrouve son commentaire."
       },
       {
        "author": {
