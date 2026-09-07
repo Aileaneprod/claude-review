@@ -364,3 +364,24 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
 " | _seed
 assert_contains "| **precision** | **0.94** |" "18 of 19 is 0.94, not 0.95" -- _report
 assert_not_contains ">= 0.95 | 0.95 | FAIL" "the cell never contradicts its own verdict" -- _report
+
+it "truncates by value, not by whatever the float happens to be"
+# Raised by CodeRabbit on the pull request that added pct(). `int(0.29 * 100)`
+# is 28, because 0.29 * 100 is 28.999999999999996 — so the cell that was made
+# to stop OVERSTATING started understating by a hundredth. 29/100, 57/100 and
+# 58/100 all did it.
+_pct() { python3 -c "
+import sys
+sys.path.insert(0, '.')
+" ; "$SCRIPTS/report.sh" --ledger "$(_led)" ; }
+python3 -c "
+import json
+f = lambda v, i: {'reviewer': 'claude', 'path': 'a%d.ts' % i, 'line': i,
+                  'finding': '🟠 Important — x%d' % i, 'author_reply': 'x',
+                  'verdict_keyword': v}
+# 29 accepted of 100 judged -> exactly 0.29
+findings = [f('accepted', i) for i in range(29)] + [f('rejected', 100 + i) for i in range(71)]
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True, 'findings': findings}))
+" | _seed
+assert_contains "| **precision** | **0.29** |" "29 of 100 is 0.29, not 0.28" -- _report

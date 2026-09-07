@@ -91,6 +91,7 @@ fi
 
 LEDGER_DIR="$ledger_dir" OURS="$ours" THEIRS="$theirs" SINCE="$since" SINCE_NOTE="$since_note" OUT_FILE="$out_file" \
 python3 <<'PY'
+import decimal
 import json
 import os
 import re
@@ -116,10 +117,18 @@ def pct(value):
     rounding made the cell read as meeting the criterion it had just failed.
     Truncating means the printed number never claims more than was measured:
     0.94 explains its own FAIL, and a genuine 0.951 still prints 0.95.
+
+    Through Decimal, and not `int(value * 100)`, because that truncates the
+    FLOAT rather than the value: 0.29 * 100 is 28.999999999999996, so the cell
+    built to stop overstating began understating by a hundredth. 29/100, 57/100
+    and 58/100 all did it. `str()` gives the shortest decimal that round-trips,
+    which is the number the arithmetic meant.
     """
     if value is None:
         return "n/a"
-    return "%.2f" % (int(value * 100) / 100.0)
+    quantised = decimal.Decimal(str(value)).quantize(
+        decimal.Decimal("0.01"), rounding=decimal.ROUND_DOWN)
+    return "%.2f" % quantised
 out_file = os.environ.get("OUT_FILE") or ""
 
 JUDGED = ("accepted", "partial", "rejected")

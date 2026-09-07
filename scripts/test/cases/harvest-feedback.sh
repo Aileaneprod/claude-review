@@ -190,26 +190,49 @@ _reharvest_keeps() {
   "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 1 --out "$(_out_dir)" \
     --threads-file "$FIXTURES/threads-verdicts.json" \
     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
-  # A classifier pass lands afterwards and writes its own fields.
+  # A classifier pass lands afterwards and writes its own fields. Each finding
+  # gets a DISTINCT verdict: with the same value everywhere, a carry-over that
+  # matched the wrong finding would still count right. Raised by CodeRabbit on
+  # the pull request that added this case.
   python3 -c "
 import json,sys
 p=sys.argv[1]
 d=json.load(open(p,encoding='utf-8'))
-for f in d['findings']:
-    f['verdict_llm']='accepted'
-    f['key']='test/repo#1|%s|%s|deadbeef' % (f.get('path'), f.get('line'))
+for i, f in enumerate(d['findings']):
+    f['verdict_llm']='verdict-%d' % i
+    f['key']='test/repo#1|%s|%s|%d' % (f.get('path'), f.get('line'), i)
 json.dump(d, open(p,'w',encoding='utf-8'), indent=2, ensure_ascii=False)
 " "$(_ledger)"
   # Then the pull request is touched again and re-harvested.
   "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 1 --out "$(_out_dir)" \
     --threads-file "$FIXTURES/threads-verdicts.json" \
     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  # Each finding must have kept ITS OWN verdict, in its own position.
   python3 -c "
 import json,sys
 d=json.load(open(sys.argv[1],encoding='utf-8'))
-print(sum(1 for f in d['findings'] if f.get('verdict_llm')), 'of', len(d['findings']))
+fs=d['findings']
+right=sum(1 for i,f in enumerate(fs) if f.get('verdict_llm')=='verdict-%d' % i)
+print(right, 'of', len(fs))
 " "$(_ledger)"
 }
 
 it "keeps the verdicts a classifier pass already wrote"
 assert_contains "7 of 7" "re-harvesting does not throw the model verdicts away" -- _reharvest_keeps
+
+it "still accepts the suffixed spelling the REST API returns"
+# The fixture above uses the GraphQL spelling, which is what this script reads —
+# so nothing exercised the `[bot]` removal any more. Raised by CodeRabbit on the
+# pull request that introduced it.
+_suffixed() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 96 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-ours-silent-suffixed.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(d.get('reviewed_by_ours','ABSENT'))
+" "$(_out_dir)/test/repo/96.json"
+}
+assert_equal "True" "$(_suffixed)" "github-actions[bot] is the same account"
