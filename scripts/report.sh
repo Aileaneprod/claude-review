@@ -15,7 +15,7 @@
 #
 # The exit criterion this serves, decided before any of it was measured:
 #
-#   On N >= 15 pull requests reviewed by both, ZERO author-confirmed blocking
+#   On at least MIN_BOTH pull requests reviewed by both, ZERO author-confirmed blocking
 #   findings that they raised and we did not, and our precision >= 0.95 on
 #   findings the author actually judged.
 #
@@ -70,6 +70,12 @@ ledger_dir = os.environ["LEDGER_DIR"]
 ours_name = os.environ["OURS"]
 theirs_name = os.environ["THEIRS"]
 since = os.environ.get("SINCE") or ""
+
+# Below this many pull requests reviewed by both, the two substantive
+# criteria cannot be said to have PASSED — there is not enough of a window
+# for the question to have been asked. Stated once; the table interpolates
+# it rather than repeating it.
+MIN_BOTH = 15
 out_file = os.environ.get("OUT_FILE") or ""
 
 JUDGED = ("accepted", "partial", "rejected")
@@ -176,15 +182,38 @@ w("")
 w("Window: %d pull request(s)%s, %d reviewed by both."
   % (len(prs), " from #%s" % since if since else "", both_reviewed))
 w("")
+# PASS is a claim that a criterion was MET. It requires a window big enough to
+# have tested it; "not yet" is what an unasked question deserves.
+#
+# FAIL is deliberately NOT gated the same way, and the asymmetry is the point: a
+# blocking finding we missed is a positive observation and counts from the first
+# one, while zero of them over three pull requests is the absence of evidence,
+# not evidence of absence. Freezing the window to start a clean measurement made
+# this urgent — on an empty window the old table printed
+#
+#     | Blocking findings only they caught | 0 | 0 | PASS |
+#
+# which is the criterion that decides, reading green because nothing had been
+# measured at all. This file's own header says a column that is quietly wrong is
+# worse than no column, because it will be believed.
+enough = both_reviewed >= MIN_BOTH
+
+
+def verdict(failed, ok):
+    if failed:
+        return "FAIL"
+    return "PASS" if (ok and enough) else "not yet"
+
+
 w("| Exit criterion | Target | Now | |")
 w("|---|---|---|---|")
 w("| Blocking findings only they caught | 0 | %d | %s |"
-  % (len(missed), "PASS" if not missed else "FAIL"))
+  % (len(missed), verdict(bool(missed), True)))
 w("| Our precision on judged findings | >= 0.95 | %s | %s |"
   % ("%.2f" % ours_p if ours_p is not None else "n/a",
-     "PASS" if (ours_p or 0) >= 0.95 else "FAIL"))
-w("| Pull requests reviewed by both | >= 15 | %d | %s |"
-  % (both_reviewed, "PASS" if both_reviewed >= 15 else "not yet"))
+     verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)))
+w("| Pull requests reviewed by both | >= %d | %d | %s |"
+  % (MIN_BOTH, both_reviewed, "PASS" if enough else "not yet"))
 w("")
 
 w("## Both reviewers, side by side")
