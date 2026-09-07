@@ -325,3 +325,18 @@ assert_contains "more than one repository" "and it names the problem" -- _report
 it "still reports both repositories when no window is asked for"
 _seed_two
 assert_contains "2 pull request(s)" "without --since the ledger is whole" -- _report
+
+it "refuses a freeze point of zero"
+# Re-seed first: the case above leaves a two-repository ledger behind, and
+# without this the multi-repo guard returns 2 and these assertions pass for a
+# reason that has nothing to do with zero.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': []}))
+" | _seed
+# Pull request numbers start at 1. `--since 0` passed the digits-only check and
+# rendered "from #0" over the whole ledger — a window that looks narrowed and
+# is not, which is the same failure as the empty value one line up.
+assert_status 2 "zero is not a pull request" -- _report --since 0
+assert_status 2 "and neither is 00" -- _report --since 00

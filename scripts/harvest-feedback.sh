@@ -87,6 +87,7 @@ query($owner:String!, $name:String!, $pr:Int!) {
       title
       state
       comments(first:100) {
+        totalCount
         nodes { author { login } body createdAt }
       }
       reviewThreads(first:100) {
@@ -255,8 +256,22 @@ SUMMARY_MARKER = "<!-- claude-review:summary -->"
 # otherwise. Both end in `[bot]`, which GitHub does not allow in a human login.
 OUR_POSTERS = ("claude[bot]", "github-actions[bot]")
 
+# One page is read, and the busiest pull request on the repository this serves
+# carries 16 comments — so this is a bound, not a live problem. It is reported
+# anyway because the failure mode is a SILENT loss of the only evidence that our
+# reviewer was present, and a number built on a partial read that nobody
+# announced is the thing this whole ledger exists not to produce.
+issue_comments = (pr_node.get("comments") or {})
+seen_comments = issue_comments.get("nodes") or []
+total_comments = issue_comments.get("totalCount")
+if isinstance(total_comments, int) and total_comments > len(seen_comments):
+    sys.stderr.write(
+        "harvest-feedback: read only the first %d of %d comments on %s#%s; "
+        "if our summary is beyond that, presence will read as absent\n"
+        % (len(seen_comments), total_comments, repo, pr))
+
 our_summary_at = None
-for comment in ((pr_node.get("comments") or {}).get("nodes") or []):
+for comment in seen_comments:
     if not isinstance(comment, dict):
         continue
     login = ((comment.get("author") or {}).get("login") or "").lower()
