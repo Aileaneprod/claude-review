@@ -340,3 +340,27 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
 # is not, which is the same failure as the empty value one line up.
 assert_status 2 "zero is not a pull request" -- _report --since 0
 assert_status 2 "and neither is 00" -- _report --since 00
+
+# --- never round a measurement up toward its target --------------------------
+#
+# A real run printed
+#
+#     | Our precision on judged findings | >= 0.95 | 0.95 | FAIL |
+#
+# The value was 0.945946. Rounded to two places it reads as meeting the target
+# it fails, and the reader has no way to reconcile the two cells. Truncating
+# downward instead means the printed number never overstates: 0.94 next to a
+# target of 0.95 explains its own FAIL, and a genuine 0.951 still shows 0.95.
+
+it "does not round a precision up to the target it misses"
+python3 -c "
+import json
+f = lambda v, i: {'reviewer': 'claude', 'path': 'a%d.ts' % i, 'line': i,
+                  'finding': '🟠 Important — x%d' % i, 'author_reply': 'x',
+                  'verdict_keyword': v}
+findings = [f('accepted', i) for i in range(18)] + [f('rejected', 99)]
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True, 'findings': findings}))
+" | _seed
+assert_contains "| **precision** | **0.94** |" "18 of 19 is 0.94, not 0.95" -- _report
+assert_not_contains ">= 0.95 | 0.95 | FAIL" "the cell never contradicts its own verdict" -- _report

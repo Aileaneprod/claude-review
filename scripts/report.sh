@@ -107,6 +107,19 @@ since_note = os.environ.get("SINCE_NOTE") or ""
 # for the question to have been asked. Stated once; the table interpolates
 # it rather than repeating it.
 MIN_BOTH = 15
+
+
+def pct(value):
+    """Two places, truncated DOWN — never rounded up toward the target.
+
+    A real run printed `| >= 0.95 | 0.95 | FAIL |`. The value was 0.945946, and
+    rounding made the cell read as meeting the criterion it had just failed.
+    Truncating means the printed number never claims more than was measured:
+    0.94 explains its own FAIL, and a genuine 0.951 still prints 0.95.
+    """
+    if value is None:
+        return "n/a"
+    return "%.2f" % (int(value * 100) / 100.0)
 out_file = os.environ.get("OUT_FILE") or ""
 
 JUDGED = ("accepted", "partial", "rejected")
@@ -289,7 +302,7 @@ w("|---|---|---|---|")
 w("| Blocking findings only they caught | 0 | %d | %s |"
   % (len(missed), verdict(bool(missed), True)))
 w("| Our precision on judged findings | >= 0.95 | %s | %s |"
-  % ("%.2f" % ours_p if ours_p is not None else "n/a",
+  % (pct(ours_p),
      verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)))
 w("| Pull requests reviewed by both | >= %d | %d | %s |"
   % (MIN_BOTH, both_reviewed, "PASS" if enough else "not yet"))
@@ -303,9 +316,7 @@ for label, key in (("accepted", "accepted"), ("partial", "partial"),
                    ("rejected", "rejected"), ("acknowledged", "acknowledged"),
                    ("no reply", "no_reply"), ("unclassified", "unknown")):
     w("| %s | %d | %d |" % (label, totals["ours"][key], totals["theirs"][key]))
-w("| **precision** | **%s** | **%s** |"
-  % ("%.2f" % ours_p if ours_p is not None else "n/a",
-     "%.2f" % theirs_p if theirs_p is not None else "n/a"))
+w("| **precision** | **%s** | **%s** |" % (pct(ours_p), pct(theirs_p)))
 w("| judged (the denominator) | %d | %d |" % (ours_judged, theirs_judged))
 w("| blocking, author-confirmed | %d | %d |"
   % (totals["ours"]["blocking_accepted"], totals["theirs"]["blocking_accepted"]))
