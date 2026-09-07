@@ -4,13 +4,23 @@
 #
 # Usage:
 #   report.sh --ledger DIR [--ours claude] [--theirs coderabbitai]
-#             [--since PR] [--out FILE]
+#             [--since PR] [--since-note TEXT] [--out FILE]
 #
 #   --ledger DIR   Harvested ledger (harvest-feedback.sh --out).
 #   --ours NAME    Reviewer prefix that is ours. Default: claude.
 #   --theirs NAME  The reviewer being compared. Default: coderabbitai.
 #   --since PR     Only pull requests at or above this number. Use the freeze
 #                  point: a prompt change mid-window invalidates the window.
+#                  A non-numeric or empty value is an ERROR, not a no-op: this
+#                  number is meant to come out of a file, and every way that
+#                  extraction can fail yields an empty string. Ignoring it would
+#                  restore the full window while the page still looked frozen,
+#                  differing by four words and exiting 0.
+#   --since-note T One line printed under the window, saying why it was reset
+#                  and where the old page went. The report is written with mode
+#                  "w", so a note added by hand dies at the next scheduled run;
+#                  it has to come through here or the page will read
+#                  "_None in this window._" as "we no longer miss anything".
 #   --out FILE     Write the report here. Default: stdout.
 #
 # The exit criterion this serves, decided before any of it was measured:
@@ -44,6 +54,8 @@ ledger_dir=""
 ours="claude"
 theirs="coderabbitai"
 since=""
+since_given=0
+since_note=""
 out_file=""
 
 die() { printf 'report: %s\n' "$1" >&2; exit 1; }
@@ -53,9 +65,10 @@ while [ "$#" -gt 0 ]; do
     --ledger) [ "$#" -ge 2 ] || die "--ledger requires a value"; ledger_dir="$2"; shift 2 ;;
     --ours)   [ "$#" -ge 2 ] || die "--ours requires a value";   ours="$2";       shift 2 ;;
     --theirs) [ "$#" -ge 2 ] || die "--theirs requires a value"; theirs="$2";     shift 2 ;;
-    --since)  [ "$#" -ge 2 ] || die "--since requires a value";  since="$2";      shift 2 ;;
+    --since)  [ "$#" -ge 2 ] || die "--since requires a value";  since="$2"; since_given=1; shift 2 ;;
+    --since-note) [ "$#" -ge 2 ] || die "--since-note requires a value"; since_note="$2"; shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
-    -h|--help) sed -n '2,39p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,49p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -63,7 +76,19 @@ done
 [ -n "$ledger_dir" ] || die "--ledger is required"
 [ -d "$ledger_dir" ] || die "no ledger at $ledger_dir"
 
-LEDGER_DIR="$ledger_dir" OURS="$ours" THEIRS="$theirs" SINCE="$since" OUT_FILE="$out_file" \
+# Fail closed. An empty or non-numeric freeze point used to be accepted and then
+# silently ignored, which is the one behaviour a freeze point must never have.
+if [ "$since_given" -eq 1 ]; then
+  case "$since" in
+    ''|*[!0-9]*)
+      printf 'report: --since needs a positive pull request number, got "%s".\n' "$since" >&2
+      printf 'report: an empty or non-numeric value is refused rather than ignored, because\n' >&2
+      printf 'report:   ignoring it restores the full window on a page that still looks frozen.\n' >&2
+      exit 2 ;;
+  esac
+fi
+
+LEDGER_DIR="$ledger_dir" OURS="$ours" THEIRS="$theirs" SINCE="$since" SINCE_NOTE="$since_note" OUT_FILE="$out_file" \
 python3 <<'PY'
 import json
 import os
@@ -74,6 +99,7 @@ ledger_dir = os.environ["LEDGER_DIR"]
 ours_name = os.environ["OURS"]
 theirs_name = os.environ["THEIRS"]
 since = os.environ.get("SINCE") or ""
+since_note = os.environ.get("SINCE_NOTE") or ""
 
 # Below this many pull requests reviewed by both, the two substantive
 # criteria cannot be said to have PASSED — there is not enough of a window
@@ -113,6 +139,7 @@ def side(finding):
 
 
 prs = {}
+repos_seen = set()
 for root, _dirs, files in os.walk(ledger_dir):
     for name in sorted(files):
         if not name.endswith(".json") or name == "gold.json":
@@ -125,6 +152,7 @@ for root, _dirs, files in os.walk(ledger_dir):
         if "findings" not in doc:
             continue
         number = doc.get("pr")
+        repos_seen.add(doc.get("repo"))
         if since and isinstance(number, int) and number < int(since):
             continue
         prs[(doc.get("repo"), number)] = doc
@@ -140,7 +168,23 @@ both_reviewed = 0
 
 for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or 0)):
     counts = {"ours": {}, "theirs": {}}
-    present = {"ours": False, "theirs": False}
+
+    # Presence, not productivity. `reviewed_by_ours` is written by
+    # harvest-feedback.sh from the sticky summary our reviewer posts on every
+    # completed run, so a review that read the diff and had nothing to file is
+    # no longer indistinguishable from one that never ran.
+    #
+    # That distinction is what the miss heuristic below turns on, and getting it
+    # wrong punished the reviewer for the behaviour its own prompt calls "a
+    # valid, frequent, and good outcome". On Aileaneprod/korbyx#92 our reviewer
+    # ran three times and posted a reasoned 0/0/0 summary; the ledger held zero
+    # findings from us, so any blocking finding of theirs there counted as ours
+    # to answer for.
+    #
+    # `or` and not `=`: a document harvested before the field existed has no
+    # opinion, and falls back to the old inference rather than asserting we were
+    # absent. Re-harvesting upgrades it; nothing regresses in the meantime.
+    present = {"ours": bool(doc.get("reviewed_by_ours")), "theirs": False}
     pr_missed = []
     for finding in doc["findings"]:
         which = side(finding)
@@ -181,10 +225,36 @@ w = out.append
 ours_p, ours_judged = precision(totals["ours"])
 theirs_p, theirs_judged = precision(totals["theirs"])
 
+# A bare pull request number is repo-blind, and the filter above compares only
+# `doc["pr"]` even though the line under it keys the result by (repo, number).
+# With two repositories in the ledger a freeze point of 114 admits an old review
+# numbered 400 in one of them and drops a pull request opened today numbered 3
+# in the other — wrong in both directions, and silent in both.
+#
+# Refused rather than fixed: making the window repo-aware means deciding what a
+# freeze point even means when two repositories are measured together, and that
+# is a question about the measurement, not about this filter. One repository is
+# the only case where a bare number carries a meaning, so it is the only case
+# allowed.
+if since and len(repos_seen) > 1:
+    sys.stderr.write(
+        "report: --since is a bare pull request number and this ledger holds "
+        "more than one repository (%s).\n"
+        % ", ".join(sorted(str(r) for r in repos_seen)))
+    sys.stderr.write(
+        "report:   the filter compares numbers only, so it would admit old pull "
+        "requests from one\n"
+        "report:   repository and drop new ones from another. Narrow --ledger to "
+        "a single repository.\n")
+    raise SystemExit(2)
+
 w("# Can we switch %s off?" % theirs_name)
 w("")
 w("Window: %d pull request(s)%s, %d reviewed by both."
   % (len(prs), " from #%s" % since if since else "", both_reviewed))
+if since_note:
+    w("")
+    w("> %s" % since_note)
 w("")
 # PASS is a claim that a criterion was MET. It requires a window big enough to
 # have tested it; "not yet" is what an unasked question deserves.
@@ -205,7 +275,11 @@ enough = both_reviewed >= MIN_BOTH
 
 def verdict(failed, ok):
     if failed:
-        return "FAIL"
+        # A FAIL earned on three pull requests and one earned on thirty read
+        # identically in a table, and only one of them is a measurement. FAIL
+        # is deliberately not gated by window size — a miss we saw is a miss —
+        # but it must not borrow the authority of a window it did not have.
+        return "FAIL" if enough else "FAIL (thin window)"
     return "PASS" if (ok and enough) else "not yet"
 
 
