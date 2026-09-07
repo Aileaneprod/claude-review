@@ -76,6 +76,11 @@ assert_contains "n/a" "no judged findings yields n/a, not 0.00" -- _report
 
 # --- the criterion that decides ----------------------------------------------
 
+# The FAIL cells below carry "(thin window)" because these fixtures hold one
+# pull request. A FAIL earned on three and one earned on thirty read the same
+# in a table and only one is a measurement; the count is what these cases
+# assert, and it is unchanged.
+
 # These fixtures hold one pull request, so the verdict column reads `not yet`
 # rather than `PASS`: what they assert is the COUNT, which is what the miss
 # heuristic gets right or wrong. A window this small cannot earn a pass.
@@ -88,7 +93,7 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL |" "a lone accepted blocking is a miss" -- _report
+assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin window) |" "a lone accepted blocking is a miss" -- _report
 assert_contains "a.ts:9" "the miss is listed, not just counted" -- _report
 
 it "does NOT count it when we also reviewed that pull request"
@@ -192,4 +197,131 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL |" "one observed miss still fails" -- _report
+assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin window) |" "one observed miss still fails" -- _report
+
+# --- silence by choice is not silence by failure ------------------------------
+#
+# The miss heuristic counts a blocking finding of theirs against us only when we
+# "said nothing on that pull request", and presence used to be inferred from
+# inline comments alone. A review that completed and had nothing to file was
+# therefore scored identically to one that never ran — punishing the reviewer
+# for the behaviour its own prompt calls "a valid, frequent, and good outcome".
+#
+# harvest-feedback.sh now records `reviewed_by_ours` from the sticky summary.
+# On korbyx#92 that flag is the only evidence we were there: three runs, a
+# reasoned 0/0/0 summary, and zero findings in the ledger.
+
+it "does not count a miss on a pull request we reviewed and stayed silent on"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 92, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'our_summary_at': '2026-09-04T16:31:00Z',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "we were there, so it is not our miss" -- _report
+
+it "still counts a miss when nothing says we were there"
+# The same document without the flag. An older ledger entry, or a run that never
+# happened — either way the heuristic keeps its old, deliberately crude answer.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 92, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin window) |" "no evidence of us, still a candidate" -- _report
+
+it "counts a pull request we read but did not comment on as reviewed by both"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 92, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 1,
+                                'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "1 pull request(s), 1 reviewed by both" "both reviewers were present" -- _report
+
+# --- a filter that fails open is worse than no filter ------------------------
+#
+# `--since ""` used to be accepted and then ignored: the Python read
+# `os.environ.get("SINCE") or ""`, empty is falsy, and the page silently
+# rendered the FULL window while looking frozen. The only visible difference
+# from a correctly frozen page was four words in the header, and it exited 0.
+#
+# That matters because the value is meant to come out of a file by sed. A
+# renamed key, a CRLF, a pattern that stops matching — all of them yield an
+# empty string, and all of them would have quietly restored the contaminated
+# numbers to the page that decides.
+
+it "refuses an empty --since instead of ignoring it"
+assert_status 2 "an empty freeze point is an error" -- _report --since ""
+assert_contains "positive pull request number" "and it says what it wanted" -- _report --since ""
+
+it "refuses a --since that is not a number"
+assert_status 2 "a non-numeric freeze point is an error" -- _report --since "since: 114"
+
+it "still accepts a real freeze point"
+assert_contains "from #99" "a number is a number" -- _report --since 99
+
+# --- a thin FAIL must not read like a measured one ---------------------------
+
+it "marks a FAIL earned on a window too thin to have measured much"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "FAIL (thin window)" "one miss on one PR is flagged as thin" -- _report
+
+# --- the frozen page must say it was frozen ----------------------------------
+#
+# report.sh writes the file with mode "w", so a note added by hand dies at the
+# next scheduled run. The page has to carry its own provenance or it will read
+# "_None in this window._" as "we no longer miss anything".
+
+it "prints the note the caller gives it, under the window line"
+assert_contains "Window reset on 2026-09-07" "the note reaches the page" \
+  -- _report --since 99 --since-note "Window reset on 2026-09-07; see report/freeze.yml."
+
+# --- a bare number cannot address two repositories ---------------------------
+#
+# The filter compares `doc["pr"]` alone and is repo-blind, even though the next
+# line keys the result by (repo, number). With a second repository in the ledger
+# a freeze point of 114 admits `other#400` — an old review, numbered high — and
+# silently drops `other#3`, a pull request opened today, which is exactly the
+# clean measurement the window exists to collect. Wrong in both directions, and
+# neither is reported.
+#
+# One repository is the only case where a bare number means anything, so that is
+# the only case it is allowed in.
+
+_seed_two() {
+  rm -rf "$(_led)"
+  mkdir -p "$(_led)/Aileaneprod/korbyx" "$(_led)/Aileaneprod/other"
+  python3 -c "
+import json, sys
+for repo, pr, path in (('Aileaneprod/korbyx', 120, sys.argv[1]),
+                       ('Aileaneprod/other', 400, sys.argv[2])):
+    json.dump({'repo': repo, 'pr': pr, 'title': 't', 'reviewed_by_ours': False,
+               'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 1,
+                             'finding': '🔴 Blocking — x', 'author_reply': 'Retenu',
+                             'verdict_keyword': 'accepted'}]},
+              open(path, 'w', encoding='utf-8'))
+" "$(_led)/Aileaneprod/korbyx/120.json" "$(_led)/Aileaneprod/other/400.json"
+}
+
+it "refuses a bare --since when the ledger holds more than one repository"
+_seed_two
+assert_status 2 "a repo-blind number is an error, not a silent misfilter" -- _report --since 114
+assert_contains "more than one repository" "and it names the problem" -- _report --since 114
+
+it "still reports both repositories when no window is asked for"
+_seed_two
+assert_contains "2 pull request(s)" "without --since the ledger is whole" -- _report

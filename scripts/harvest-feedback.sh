@@ -86,6 +86,9 @@ query($owner:String!, $name:String!, $pr:Int!) {
     pullRequest(number:$pr) {
       title
       state
+      comments(first:100) {
+        nodes { author { login } body createdAt }
+      }
       reviewThreads(first:100) {
         nodes {
           isResolved
@@ -222,11 +225,41 @@ for thread in pr_node["reviewThreads"]["nodes"]:
         "outdated": thread.get("isOutdated"),
     })
 
+# Did our reviewer read this pull request at all?
+#
+# Presence used to be inferred from inline comments, so a review that COMPLETED
+# and had nothing to file was indistinguishable from one that never ran. That
+# distinction is the whole miss heuristic: report.sh counts a blocking finding
+# of theirs against us only when we "said nothing on that pull request", and a
+# reviewer whose job description says silence is a valid and frequent outcome
+# was therefore punished for doing exactly what it was told.
+#
+# Measured, not supposed: on Aileaneprod/korbyx#92 our reviewer ran three times
+# and posted a reasoned 0/0/0 summary that had read the Terraform, the migration
+# and the README. The ledger held nothing from us for that pull request. Five of
+# the seven "blocking findings only they caught" sit on pull requests shaped
+# like that one.
+#
+# The sticky summary is the artefact that says we were there. post-review.sh
+# writes the marker below and owns that comment; nothing else emits it.
+SUMMARY_MARKER = "<!-- claude-review:summary -->"
+
+our_summary_at = None
+for comment in ((pr_node.get("comments") or {}).get("nodes") or []):
+    if not isinstance(comment, dict):
+        continue
+    if SUMMARY_MARKER in (comment.get("body") or ""):
+        # The sticky is upserted in place, so there is normally exactly one.
+        # Take the last if a stray duplicate survives collapsing.
+        our_summary_at = comment.get("createdAt") or our_summary_at
+
 out = {
     "repo": repo,
     "pr": int(pr),
     "title": pr_node.get("title"),
     "state": pr_node.get("state"),
+    "reviewed_by_ours": our_summary_at is not None,
+    "our_summary_at": our_summary_at,
     "findings": records,
 }
 with open(out_path, "w", encoding="utf-8", newline="\n") as fh:

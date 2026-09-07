@@ -89,3 +89,52 @@ assert_equal "deadbeef1234" "$(_field a.ts reviewed_commit)" \
 
 it "keeps the author's own words alongside the guess"
 assert_equal "**Retenu**." "$(_field a.ts human_reply)" "the verbatim reply survives the guess"
+
+# --- "we reviewed and had nothing to say" is not "we never ran" ---------------
+#
+# The ledger recorded a reviewer's presence only through inline comments, and
+# this harvester fetched only reviewThreads — never issue comments. So a review
+# that completed and found nothing left NO trace, and report.sh's miss heuristic
+# ("they found it, we said nothing on that pull request") counted every blocking
+# finding of theirs on such a pull request as ours to answer for.
+#
+# That is not hypothetical. On Aileaneprod/korbyx#92 our reviewer ran three
+# times, posted a reasoned 0/0/0 summary that read the Terraform, the migration
+# and the README — and the ledger holds zero findings from us for that pull
+# request. Five of the seven "blocking findings only they caught" sit on pull
+# requests of exactly this shape.
+#
+# The sticky summary carries `<!-- claude-review:summary -->`, posted by
+# post-review.sh. It is the one artefact that says we were there.
+
+_silent() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 92 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-ours-silent.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(d.get(sys.argv[2], 'ABSENT'))
+" "$(_out_dir)/test/repo/92.json" "$1"
+}
+
+it "records that our reviewer was there even when it filed nothing"
+assert_equal "True" "$(_silent reviewed_by_ours)" "the sticky summary is proof we ran"
+assert_equal "2026-09-04T16:31:00Z" "$(_silent our_summary_at)" "and when it was posted"
+
+it "does not mistake anyone else's comment for our summary"
+# Same shape, but the only issue comment is the competitor's walkthrough.
+# A marker check that cannot say no is not a check.
+_silent_none() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 93 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-nobody-of-ours.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(d.get('reviewed_by_ours', 'ABSENT'))
+" "$(_out_dir)/test/repo/93.json"
+}
+assert_equal "False" "$(_silent_none)" "no marker, no claim that we were there"
