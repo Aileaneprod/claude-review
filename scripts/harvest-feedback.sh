@@ -120,12 +120,52 @@ mkdir -p "${out_dir}/${owner}/${name}"
 
 python3 - "${work_dir}/threads.json" "${work_dir}/rest.json" \
           "${out_dir}/${owner}/${name}/${pr_number}.json" "$repo" "$pr_number" <<'PY'
+import hashlib
 import json
+import os
 import re
 import unicodedata
 import sys
 
 threads_path, rest_path, out_path, repo, pr = sys.argv[1:6]
+
+
+# A finding is identified by where it sits and what it says. That is the same
+# shape classify-verdicts.sh uses for its `key`, minus the repo and number,
+# which are constant within one document.
+def finding_key(finding):
+    digest = hashlib.sha256(
+        (finding.get("finding") or "").encode("utf-8")).hexdigest()[:8]
+    return (finding.get("path"), finding.get("line"), digest)
+
+
+# Everything a LATER pass writes onto a finding, which this one must carry over.
+#
+# This script rebuilds the whole document from the API response, so anything
+# added afterwards used to vanish the next time the pull request was touched.
+# harvest.yml harvests and then classifies every pull request updated in the
+# last three days, so an active one was re-classified from scratch every
+# morning: model calls re-spent, and verdicts free to flip between runs on the
+# page that decides. A `verdict_human` correction would have gone the same way,
+# and that one is not recoverable by re-running anything.
+#
+# Measured: re-harvesting the ledger by hand returned 44 findings that carried a
+# model verdict as `unknown`, and moved the published precision for a reason
+# that had nothing to do with the reviewer.
+CARRIED_OVER = ("key", "verdict_llm", "verdict_keyword", "verdict_human")
+
+previous = {}
+if os.path.exists(out_path):
+    try:
+        with open(out_path, encoding="utf-8") as fh:
+            for finding in (json.load(fh).get("findings") or []):
+                if isinstance(finding, dict):
+                    previous[finding_key(finding)] = finding
+    except (OSError, ValueError):
+        # An unreadable previous document is not a reason to fail the harvest.
+        # It costs a re-classification, which is exactly what this avoids in the
+        # ordinary case, and nothing else.
+        previous = {}
 
 with open(threads_path, encoding="utf-8") as fh:
     doc = json.load(fh)
@@ -299,6 +339,14 @@ for comment in seen_comments:
         # The sticky is upserted in place, so there is normally exactly one.
         # Take the last if a stray duplicate survives collapsing.
         our_summary_at = comment.get("createdAt") or our_summary_at
+
+for finding in records:
+    kept = previous.get(finding_key(finding))
+    if not kept:
+        continue
+    for field in CARRIED_OVER:
+        if kept.get(field) is not None and finding.get(field) is None:
+            finding[field] = kept[field]
 
 out = {
     "repo": repo,

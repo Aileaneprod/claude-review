@@ -170,3 +170,46 @@ _truncated() {
     --rest-file "$FIXTURES/rest-verdicts.json" 2>&1 >/dev/null
 }
 assert_contains "only the first" "a partial read is reported, not assumed complete" -- _truncated
+
+# --- harvesting must not destroy what classifying added ----------------------
+#
+# harvest-feedback.sh rewrites the whole document from the API response, so every
+# field a later pass added — `key`, `verdict_llm`, `verdict_keyword`, and any
+# `verdict_human` correction — vanished the next time the pull request was
+# touched. harvest.yml runs harvest and then classify daily, on everything
+# updated in the last three days, so a pull request that keeps receiving comments
+# was re-classified from scratch every morning: LLM calls re-spent, and verdicts
+# free to flip between runs on the page that decides.
+#
+# Found by re-harvesting the whole ledger locally: 44 findings that carried a
+# model verdict came back `unknown`, and the precision figure moved for a reason
+# that had nothing to do with the reviewer.
+
+_reharvest_keeps() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 1 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-verdicts.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  # A classifier pass lands afterwards and writes its own fields.
+  python3 -c "
+import json,sys
+p=sys.argv[1]
+d=json.load(open(p,encoding='utf-8'))
+for f in d['findings']:
+    f['verdict_llm']='accepted'
+    f['key']='test/repo#1|%s|%s|deadbeef' % (f.get('path'), f.get('line'))
+json.dump(d, open(p,'w',encoding='utf-8'), indent=2, ensure_ascii=False)
+" "$(_ledger)"
+  # Then the pull request is touched again and re-harvested.
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 1 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-verdicts.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(sum(1 for f in d['findings'] if f.get('verdict_llm')), 'of', len(d['findings']))
+" "$(_ledger)"
+}
+
+it "keeps the verdicts a classifier pass already wrote"
+assert_contains "7 of 7" "re-harvesting does not throw the model verdicts away" -- _reharvest_keeps
