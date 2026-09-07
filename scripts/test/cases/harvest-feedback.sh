@@ -156,3 +156,17 @@ print(d.get('reviewed_by_ours','ABSENT'))
 " "$(_out_dir)/test/repo/94.json"
 }
 assert_equal "False" "$(_impostor)" "a human quoting the marker is not our review"
+
+it "says so when it could not see every comment"
+# `comments(first:100)` reads one page. The highest count on korbyx today is 16,
+# so this is not a live problem — but the failure mode is a SILENT loss of the
+# only evidence that our reviewer was present, and the ledger's whole purpose is
+# to not be quietly wrong. It is cheaper to say "I did not look at all of them"
+# than to discover later that a number was built on a partial read.
+_truncated() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 95 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-many-comments.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" 2>&1 >/dev/null
+}
+assert_contains "only the first" "a partial read is reported, not assumed complete" -- _truncated

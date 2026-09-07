@@ -80,8 +80,9 @@ done
 # silently ignored, which is the one behaviour a freeze point must never have.
 if [ "$since_given" -eq 1 ]; then
   case "$since" in
-    ''|*[!0-9]*)
+    ''|*[!0-9]*|0|0*)
       printf 'report: --since needs a positive pull request number, got "%s".\n' "$since" >&2
+      printf 'report:   pull requests are numbered from 1, so 0 and leading zeros are refused too.\n' >&2
       printf 'report: an empty or non-numeric value is refused rather than ignored, because\n' >&2
       printf 'report:   ignoring it restores the full window on a page that still looks frozen.\n' >&2
       exit 2 ;;
