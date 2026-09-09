@@ -539,6 +539,7 @@ config/defaults.yml  <  workflow inputs  <  that repo's own .claude-review.yml
 | Comment says "AI review skipped — pull request from a fork" | Expected — forks never get secrets, by GitHub design, so it can't authenticate. Review it manually. |
 | Comment says "AI review unavailable" / step fails immediately | `CLAUDE_CODE_OAUTH_TOKEN` missing on that repo, or the token expired (they last a year) | Redo step 2 (mint a new one) and step 3 (re-set the secret on that repo) |
 | Runs, finishes, but posts nothing at all | Check the Actions run's **Summary** tab first — it usually explains why (e.g. every changed file was excluded, or the App isn't installed) | Reread the job summary; if genuinely blank, that can also just mean the PR had nothing to flag |
+| Review didn't happen, but the check is green and no grey `AI review outcome` check appeared | That repo's wrapper doesn't grant `checks: write` | Add `checks: write` to the `permissions:` block of its `.github/workflows/ai-review.yml`; the run's Summary tab says so too |
 | Reviewer runs but can't post comments | `permissions:` block missing from that repo's wrapper file | Compare against [`templates/wrapper.yml`](../templates/wrapper.yml) and fix |
 | `gh secret set` hangs waiting for input | It's waiting for you to paste the token, not run silently | Paste the token, press Enter |
 | Wrong GitHub account active in `gh` | You're logged into more than one account | `gh auth switch --hostname github.com --user jdfyras` |

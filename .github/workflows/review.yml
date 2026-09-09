@@ -117,6 +117,13 @@ concurrency:
   group: claude-review-${{ github.repository }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+env:
+  # The check run published when no review happened. Named once, because the
+  # name is also the address: the notice looks a check run of this name up on
+  # the head SHA and patches it rather than stacking a second grey row on a
+  # re-run. Changing it orphans the ones already on open pull requests.
+  OUTCOME_CHECK_NAME: AI review outcome
+
 jobs:
   # ---------------------------------------------------------------------------
   # The review itself.
@@ -140,10 +147,25 @@ jobs:
       && github.event.pull_request.user.login != 'renovate'
       && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
       && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-      pull-requests: write
-      id-token: write
+    # NO `permissions:` block here, on purpose, and it is not an omission.
+    #
+    # A block in a CALLED workflow is exhaustive: whatever it does not list is
+    # `none`, whatever the caller granted. So this job used to restate the
+    # wrapper's three scopes and could never hold a fourth — which is what the
+    # unavailable notice below needs to publish its check run.
+    #
+    # Adding `checks: write` here instead is not an option. Measured on
+    # theo986/claude-review run 34415031622: a caller granting today's wrapper
+    # set, calling a workflow whose job asks for `checks: write`, produces
+    # `startup_failure` — the whole run, every job, before anything executes.
+    # `@v1` is a moving tag, so that would have broken every consuming
+    # repository at the moment of the retag, not at the moment they opted in.
+    #
+    # With no block, the job inherits the caller's grant (run 34415220299): a
+    # wrapper carrying `checks: write` gets it, one that does not gets a plain
+    # 403 the notice step handles, and neither fails to start. The wrapper is
+    # now the single place that says what this token may do, which is what its
+    # own header already claimed.
     steps:
       # GUARD 7 — no usable credential.
       #
@@ -605,6 +627,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           # Same discipline as the verdict: the pessimistic answer is on disk
@@ -617,6 +640,22 @@ jobs:
           fi
           .claude-review-tooling/scripts/post-review.sh "${args[@]}"
           echo "posted=$(cat "$RUNNER_TEMP/posted")" >> "$GITHUB_OUTPUT"
+
+          # A re-run of the SAME push corrects itself. An earlier attempt on
+          # this commit may have published `AI review outcome` as `neutral`; a
+          # summary has now landed beside it, and one commit carrying two
+          # signals that contradict each other is the defect this check exists
+          # to fix, not a smaller version of it. `--only-if-exists` creates
+          # nothing, so a first attempt that succeeds stays as quiet as it is
+          # today, and a caller without `checks: write` is unaffected.
+          if [ "$(cat "$RUNNER_TEMP/posted")" = true ]; then
+            .claude-review-tooling/scripts/publish-outcome-check.sh \
+              --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" \
+              --name "$OUTCOME_CHECK_NAME" --conclusion success \
+              --title "AI review completed" \
+              --summary "An earlier attempt on this commit could not review it. This one did, and its summary is on the pull request." \
+              --only-if-exists || true
+          fi
 
       # One question, asked of the only step that can answer it: did a summary
       # comment actually land? `steps.summary.outputs.posted` is empty when that
@@ -636,6 +675,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           VERDICT: ${{ steps.verdict.outputs.value }}
         run: |
@@ -689,6 +729,38 @@ jobs:
           echo "::warning title=${headline}::No review summary was posted; merge is not blocked"
           gh pr comment "$PR_NUMBER" --body "$body" \
             || echo "Could not post the notice comment; the job summary above records it."
+
+          # The three lines above were ALL already there while
+          # Aileaneprod/korbyx#131 was merged believing a review had happened.
+          # None of them is what a reviewer reads: the check is, and the check
+          # was green. This publishes the one signal that was missing.
+          #
+          # A job cannot conclude `neutral` — `exit 78` concludes `failure`
+          # (run 34414488366) and nothing replaced it — so the fact is
+          # published beside the job as a check run of its own. `failure` was
+          # available and is deliberately not used: it would make the merge
+          # depend on a third-party service being up.
+          .claude-review-tooling/scripts/publish-outcome-check.sh \
+            --repo "$GITHUB_REPOSITORY" --sha "$HEAD_SHA" \
+            --name "$OUTCOME_CHECK_NAME" --conclusion neutral \
+            --title "$headline" \
+            --summary "$reason This does not block merging. See the \`AI review\` job for the diagnostic." \
+            --state-out "$RUNNER_TEMP/outcome-check" || true
+
+          # A denial is worth saying out loud: without `checks: write` the
+          # repository keeps the green check this step exists to correct, and
+          # the only place that can say so is the run it happened in.
+          if [ "$(cat "$RUNNER_TEMP/outcome-check" 2>/dev/null || true)" = denied ]; then
+            {
+              echo
+              echo "The \`$OUTCOME_CHECK_NAME\` check could not be published: this"
+              echo "workflow's caller does not grant \`checks: write\`. Until it does,"
+              echo "the green check on this pull request does not distinguish a review"
+              echo "that found nothing from one that never ran. Add \`checks: write\` to"
+              echo "the \`permissions:\` block of \`.github/workflows/ai-review.yml\`."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=AI review outcome check not published::add checks: write to the caller's permissions block"
+          fi
 
       # Opt-in only. An AI reviewer should not hold merge authority by default.
       - name: Enforce blocking findings

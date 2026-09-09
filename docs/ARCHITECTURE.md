@@ -286,6 +286,52 @@ remembering even though nothing depends on it now.
 
 `fail_on_blocking` is opt-in and off by default.
 
+### Non-blocking is not the same as silent
+
+The job concludes `success` even when no review happened, and it has to: the
+merge must not depend on a third-party service being up. But a green check is
+read as "the reviewer looked and found nothing", and on Aileaneprod/korbyx#131
+that reading was wrong three times in a row and the pull request was merged on
+it. The step summary, the annotation and the notice comment all said the truth;
+none of them is what a reviewer looks at.
+
+So the notice step also publishes a check run of its own, `AI review outcome`,
+concluded `neutral`. Grey sits next to green in the merge box and says which of
+the two things happened.
+
+**The job itself cannot be `neutral`.** Measured, not remembered, on
+theo986/claude-review run 34414488366:
+
+| what was tried | job conclusion |
+| -- | -- |
+| `exit 78` | `failure` |
+| job-level `continue-on-error` + `exit 1` | `failure` |
+| `POST /check-runs` with `conclusion=neutral` | a check run genuinely `neutral` |
+
+The neutral exit code went away when Actions left HCL and nothing replaced it.
+A separate check run is the closest thing that exists.
+
+**Which is why `review.yml`'s review job has no `permissions:` block.** A block
+in a called workflow is exhaustive — anything it does not list is `none`, even
+when the caller granted it (run 34415311149). And a called workflow that asks
+for more than its caller granted does not degrade: the entire run is
+`startup_failure` before any job starts (run 34415031622). Since `@v1` is a
+moving tag, declaring `checks: write` there would have broken every consuming
+repository at the retag rather than when each of them opted in. With no block,
+the job inherits the caller's grant (run 34415220299), the wrapper is the one
+place that decides, and a wrapper without `checks: write` gets a plain 403 that
+`publish-outcome-check.sh` reports and does not fail on.
+
+The notice comment is deliberately **not** sticky, unlike the summary. It says
+"no summary was posted for this push", which is a fact about one push; three
+pushes that went unreviewed are three separate facts and collapsing them would
+erase two. The check run is the opposite — it is addressed by name on the head
+SHA, so a re-run of the same push updates it in place instead of stacking, and
+a re-run that then reviews the commit successfully turns the grey check green
+rather than leaving it to contradict the summary that just landed. That
+correction only ever updates a check run an earlier attempt published; a review
+that worked the first time creates nothing.
+
 ## The eval harness cannot catch environment-assumption errors
 
 Worth stating plainly, because it was learned the hard way. Every fixture in

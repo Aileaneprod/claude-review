@@ -20,6 +20,13 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write
+      # Lets the review publish an `AI review outcome` check run, `neutral`,
+      # when it could not review this push. Without it the job's own check
+      # goes green either way, and a review that never ran is indistinguishable
+      # from one that ran and found nothing — which is how Aileaneprod/korbyx#131
+      # was merged unreviewed. review.yml degrades quietly if this line is
+      # absent: the review still happens, only the grey check does not.
+      checks: write
     uses: ./.github/workflows/review.yml
     with:
       # Load scripts and prompts from THIS pull request's head, not from the
