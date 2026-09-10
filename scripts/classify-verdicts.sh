@@ -5,6 +5,7 @@
 # Usage:
 #   classify-verdicts.sh --ledger DIR [--keyword-only] [--only-unclassified]
 #                        [--max-calls N] [--gold FILE] [--min-agreement PCT]
+#                        [--agreement-out FILE]
 #                        [--model ID] [--response-file FILE]
 #
 #   --ledger DIR         Harvested ledger (harvest-feedback.sh --out).
@@ -18,6 +19,12 @@
 #                        build a gold file from the ledger rather than by hand. A
 #                        key that matches nothing exits 2 rather than scoring 100%.
 #   --min-agreement PCT  Exit 1 if agreement with --gold falls below this.
+#   --agreement-out F    Write the agreement as "agreed/checked" to F, whether
+#                        or not the gate passed. The gate ran below its
+#                        threshold for four consecutive days with only a job
+#                        annotation to show for it; the page that quotes the
+#                        precision this classifier produced said nothing. The
+#                        fraction goes to report.sh --gold-agreement.
 #   --model ID           Model for the LLM pass. Read the current id from the
 #                        docs; do not carry one in your head.
 #   --response-file FILE Canned API response, for tests.
@@ -48,6 +55,7 @@ only_unclassified=0
 max_calls=300
 gold_file=""
 min_agreement=""
+agreement_out=""
 model=""
 response_file=""
 
@@ -61,9 +69,10 @@ while [ "$#" -gt 0 ]; do
     --max-calls)      [ "$#" -ge 2 ] || die "--max-calls requires a value"; max_calls="$2";    shift 2 ;;
     --gold)           [ "$#" -ge 2 ] || die "--gold requires a value";    gold_file="$2";      shift 2 ;;
     --min-agreement)  [ "$#" -ge 2 ] || die "--min-agreement requires a value"; min_agreement="$2"; shift 2 ;;
+    --agreement-out)  [ "$#" -ge 2 ] || die "--agreement-out requires a value"; agreement_out="$2"; shift 2 ;;
     --model)          [ "$#" -ge 2 ] || die "--model requires a value";   model="$2";          shift 2 ;;
     --response-file)  [ "$#" -ge 2 ] || die "--response-file requires a value"; response_file="$2"; shift 2 ;;
-    -h|--help)        sed -n '2,41p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,48p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -83,7 +92,7 @@ KEYWORD_ONLY="$keyword_only" \
 ONLY_UNCLASSIFIED="$only_unclassified" \
 MAX_CALLS="$max_calls" \
 GOLD_FILE="$gold_file" \
-MIN_AGREEMENT="$min_agreement" \
+MIN_AGREEMENT="$min_agreement" AGREEMENT_OUT="$agreement_out" \
 MODEL="$model" \
 RESPONSE_FILE="$response_file" \
 python3 <<'PY'
@@ -101,6 +110,7 @@ only_unclassified = os.environ["ONLY_UNCLASSIFIED"] == "1"
 max_calls = int(os.environ["MAX_CALLS"] or 300)
 gold_file = os.environ.get("GOLD_FILE") or ""
 min_agreement = os.environ.get("MIN_AGREEMENT") or ""
+agreement_out = os.environ.get("AGREEMENT_OUT") or ""
 model = os.environ.get("MODEL") or ""
 response_file = os.environ.get("RESPONSE_FILE") or ""
 
@@ -423,6 +433,11 @@ if gold_file:
     pct = 100.0 * len(agreed) / len(checked)
     sys.stderr.write("classify-verdicts: agreement %.1f%% (%d/%d) against the gold set\n"
                      % (pct, len(agreed), len(checked)))
+    # Written BEFORE the gate is judged, so a failing score is published rather
+    # than hidden — publishing the bad case is the whole reason this exists.
+    if agreement_out:
+        with open(agreement_out, "w", encoding="utf-8") as handle:
+            handle.write("%d/%d" % (len(agreed), len(checked)))
     for key, want, got in checked:
         if want != got:
             sys.stderr.write("  disagree  %s: gold=%s ours=%s\n" % (key, want, got))

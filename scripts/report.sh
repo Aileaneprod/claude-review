@@ -4,7 +4,7 @@
 #
 # Usage:
 #   report.sh --ledger DIR [--ours claude] [--theirs coderabbitai]
-#             [--since PR] [--since-note TEXT] [--out FILE]
+#             [--since PR] [--since-note TEXT] [--gold-agreement N/M] [--out FILE]
 #
 #   --ledger DIR   Harvested ledger (harvest-feedback.sh --out).
 #   --ours NAME    Reviewer prefix that is ours. Default: claude.
@@ -21,6 +21,13 @@
 #                  "w", so a note added by hand dies at the next scheduled run;
 #                  it has to come through here or the page will read
 #                  "_None in this window._" as "we no longer miss anything".
+#   --gold-agreement N/M
+#                  The classifier's agreement with the hand-labelled gold set,
+#                  as "agreed/checked" from classify-verdicts.sh --agreement-out.
+#                  Printed as a fourth criterion row. Below 95% the precision
+#                  row is marked provisional: that number is only as good as the
+#                  verdicts it is computed from, and the gate that certifies
+#                  them ran red for four days without the page saying a word.
 #   --out FILE     Write the report here. Default: stdout.
 #
 # The exit criterion this serves, decided before any of it was measured:
@@ -56,6 +63,7 @@ theirs="coderabbitai"
 since=""
 since_given=0
 since_note=""
+gold_agreement=""
 out_file=""
 
 die() { printf 'report: %s\n' "$1" >&2; exit 1; }
@@ -67,14 +75,31 @@ while [ "$#" -gt 0 ]; do
     --theirs) [ "$#" -ge 2 ] || die "--theirs requires a value"; theirs="$2";     shift 2 ;;
     --since)  [ "$#" -ge 2 ] || die "--since requires a value";  since="$2"; since_given=1; shift 2 ;;
     --since-note) [ "$#" -ge 2 ] || die "--since-note requires a value"; since_note="$2"; shift 2 ;;
+    --gold-agreement) [ "$#" -ge 2 ] || die "--gold-agreement requires a value"; gold_agreement="$2"; shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
-    -h|--help) sed -n '2,49p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 [ -n "$ledger_dir" ] || die "--ledger is required"
 [ -d "$ledger_dir" ] || die "no ledger at $ledger_dir"
+
+# Fail closed, like --since: a malformed fraction must not be read as "no
+# score", because "no score" prints a page that looks complete.
+if [ -n "$gold_agreement" ]; then
+  case "$gold_agreement" in
+    *[!0-9/]*|*/*/*|/*|*/|"")
+      printf 'report: --gold-agreement needs "agreed/checked", got "%s".' "$gold_agreement" >&2
+      printf '%s' "" >&2; echo >&2
+      exit 2 ;;
+  esac
+  case "${gold_agreement#*/}" in 0|0*)
+      printf 'report: --gold-agreement checked nothing ("%s"); a gold set that matches nothing is not a score.' "$gold_agreement" >&2
+      echo >&2
+      exit 2 ;;
+  esac
+fi
 
 # Fail closed. An empty or non-numeric freeze point used to be accepted and then
 # silently ignored, which is the one behaviour a freeze point must never have.
@@ -89,7 +114,7 @@ if [ "$since_given" -eq 1 ]; then
   esac
 fi
 
-LEDGER_DIR="$ledger_dir" OURS="$ours" THEIRS="$theirs" SINCE="$since" SINCE_NOTE="$since_note" OUT_FILE="$out_file" \
+LEDGER_DIR="$ledger_dir" OURS="$ours" THEIRS="$theirs" SINCE="$since" SINCE_NOTE="$since_note" GOLD_AGREEMENT="$gold_agreement" OUT_FILE="$out_file" \
 python3 <<'PY'
 import decimal
 import json
@@ -102,6 +127,7 @@ ours_name = os.environ["OURS"]
 theirs_name = os.environ["THEIRS"]
 since = os.environ.get("SINCE") or ""
 since_note = os.environ.get("SINCE_NOTE") or ""
+gold_agreement = os.environ.get("GOLD_AGREEMENT") or ""
 
 # Below this many pull requests reviewed by both, the two substantive
 # criteria cannot be said to have PASSED — there is not enough of a window
@@ -295,6 +321,19 @@ w("")
 # worse than no column, because it will be believed.
 enough = both_reviewed >= MIN_BOTH
 
+# The classifier's score, when given. The precision row is computed from the
+# verdicts this classifier produced, so below its gate that row cannot be
+# called PASSED whatever the arithmetic says — the arithmetic is the part in
+# doubt. "not yet (provisional)" rather than FAIL: nothing was measured wrong,
+# the measuring instrument is uncertified.
+GOLD_GATE = 95.0
+gold_pct = None
+gold_agreed = gold_checked = 0
+if gold_agreement:
+    gold_agreed, gold_checked = (int(x) for x in gold_agreement.split("/"))
+    gold_pct = 100.0 * gold_agreed / gold_checked
+classifier_uncertified = gold_pct is not None and gold_pct < GOLD_GATE
+
 
 def verdict(failed, ok):
     if failed:
@@ -310,9 +349,15 @@ w("| Exit criterion | Target | Now | |")
 w("|---|---|---|---|")
 w("| Blocking findings only they caught | 0 | %d | %s |"
   % (len(missed), verdict(bool(missed), True)))
+precision_verdict = verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)
+if classifier_uncertified and precision_verdict == "PASS":
+    precision_verdict = "not yet (provisional)"
 w("| Our precision on judged findings | >= 0.95 | %s | %s |"
-  % (pct(ours_p),
-     verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)))
+  % (pct(ours_p), precision_verdict))
+if gold_pct is not None:
+    w("| Classifier agreement with the gold set | >= %d%% | %.1f%% (%d/%d) | %s |"
+      % (GOLD_GATE, gold_pct, gold_agreed, gold_checked,
+         "PASS" if not classifier_uncertified else "FAIL"))
 w("| Pull requests reviewed by both | >= %d | %d | %s |"
   % (MIN_BOTH, both_reviewed, "PASS" if enough else "not yet"))
 w("")
