@@ -275,6 +275,7 @@ d=json.load(open(p,encoding='utf-8'))
 for i, f in enumerate(d['findings']):
     f['verdict_llm']='verdict-%d' % i
     f['verdict_human']='Retenu-%d' % i
+    f['verdict_keyword']='keyword-%d' % i
 json.dump(d, open(p,'w',encoding='utf-8'), indent=2, ensure_ascii=False)
 " "$(_out_dir)/test/repo/2.json" || return 1
   # A commit lands and shifts every thread down three lines. Same file, same
@@ -303,11 +304,13 @@ d=json.load(open(sys.argv[1],encoding='utf-8'))
 fs=d['findings']
 llm=sum(1 for i,f in enumerate(fs) if f.get('verdict_llm')=='verdict-%d' % i)
 hum=sum(1 for i,f in enumerate(fs) if f.get('verdict_human')=='Retenu-%d' % i)
+kw=sum(1 for i,f in enumerate(fs) if f.get('verdict_keyword')=='keyword-%d' % i)
 print('lines', ','.join(str(f.get('line')) for f in fs),
-      '- llm', llm, 'of', len(fs), '- human', hum, 'of', len(fs))
+      '- llm', llm, 'of', len(fs), '- human', hum, 'of', len(fs),
+      '- keyword', kw, 'of', len(fs))
 " "$(_out_dir)/test/repo/2.json"
 }
-assert_contains "lines 13,23,33,43,53,63,73 - llm 7 of 7 - human 7 of 7"   "a shifted line does not lose a verdict" -- _reharvest_after_shift
+assert_contains "lines 13,23,33,43,53,63,73 - llm 7 of 7 - human 7 of 7 - keyword 7 of 7"   "a shifted line does not lose a verdict" -- _reharvest_after_shift
 
 it "keeps the cache stamp, not just the verdict it stamps"
 # classify-verdicts.sh caches on `finding.get("verdict_llm_key") == digest`, so a
