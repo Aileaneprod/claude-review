@@ -1,51 +1,54 @@
 {
- "data": {
-  "repository": {
-   "pullRequest": {
-    "title": "KOR-93 : une PR que seul le concurrent a relue",
-    "state": "MERGED",
-    "comments": {
-     "nodes": [
-      {
-       "author": {
-        "login": "coderabbitai"
-       },
-       "createdAt": "2026-09-04T16:05:00Z",
-       "body": "Walkthrough by coderabbit, not a summary of ours."
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "title": "KOR-93 : une PR que seul le concurrent a relue",
+        "state": "MERGED",
+        "comments": {
+          "nodes": [
+            {
+              "author": {
+                "login": "coderabbitai",
+                "__typename": "Bot"
+              },
+              "createdAt": "2026-09-04T16:05:00Z",
+              "body": "Walkthrough by coderabbit, not a summary of ours."
+            }
+          ]
+        },
+        "reviewThreads": {
+          "nodes": [
+            {
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "docs/adr/0018.md",
+              "line": 23,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 900001,
+                    "author": {
+                      "login": "coderabbitai",
+                      "__typename": "Bot"
+                    },
+                    "createdAt": "2026-09-04T16:06:00Z",
+                    "body": "_🔒 Security_ | _🔴 Critical_  🔴 Bloquant — le controle d'acces du secret n'est pas specifie."
+                  },
+                  {
+                    "databaseId": 900002,
+                    "author": {
+                      "login": "theo986",
+                      "__typename": "User"
+                    },
+                    "createdAt": "2026-09-04T18:00:00Z",
+                    "body": "Retenu, corrige."
+                  }
+                ]
+              }
+            }
+          ]
+        }
       }
-     ]
-    },
-    "reviewThreads": {
-     "nodes": [
-      {
-       "isResolved": true,
-       "isOutdated": false,
-       "path": "docs/adr/0018.md",
-       "line": 23,
-       "comments": {
-        "nodes": [
-         {
-          "databaseId": 900001,
-          "author": {
-           "login": "coderabbitai"
-          },
-          "createdAt": "2026-09-04T16:06:00Z",
-          "body": "_🔒 Security_ | _🔴 Critical_  🔴 Bloquant — le controle d'acces du secret n'est pas specifie."
-         },
-         {
-          "databaseId": 900002,
-          "author": {
-           "login": "theo986"
-          },
-          "createdAt": "2026-09-04T18:00:00Z",
-          "body": "Retenu, corrige."
-         }
-        ]
-       }
-      }
-     ]
     }
-   }
   }
- }
 }

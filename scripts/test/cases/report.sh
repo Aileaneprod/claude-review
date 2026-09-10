@@ -370,10 +370,6 @@ it "truncates by value, not by whatever the float happens to be"
 # is 28, because 0.29 * 100 is 28.999999999999996 — so the cell that was made
 # to stop OVERSTATING started understating by a hundredth. 29/100, 57/100 and
 # 58/100 all did it.
-_pct() { python3 -c "
-import sys
-sys.path.insert(0, '.')
-" ; "$SCRIPTS/report.sh" --ledger "$(_led)" ; }
 python3 -c "
 import json
 f = lambda v, i: {'reviewer': 'claude', 'path': 'a%d.ts' % i, 'line': i,

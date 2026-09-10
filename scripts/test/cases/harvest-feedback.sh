@@ -236,3 +236,106 @@ print(d.get('reviewed_by_ours','ABSENT'))
 " "$(_out_dir)/test/repo/96.json"
 }
 assert_equal "True" "$(_suffixed)" "github-actions[bot] is the same account"
+
+it "will not let a HUMAN account named claude claim we were there"
+# The suffix is not the discriminant, and `claude` is not a hypothetical login:
+# `gh api users/claude` returns type `User`, created 2009-05-07. Comparing the
+# bare login moved the spoofing this guard exists to stop from the marker text to
+# the account name — a passer-by with that name sets the presence flag. The
+# fixture below is the silent-summary shape with one thing changed: the poster is
+# that human. `__typename` is the one property they cannot hold.
+_human_named_claude() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 97 --out "$(_out_dir)"     --threads-file "$FIXTURES/threads-marker-from-a-human-named-claude.json"     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+print(d.get('reviewed_by_ours','ABSENT'))
+" "$(_out_dir)/test/repo/97.json"
+}
+assert_equal "False" "$(_human_named_claude)" "the account type decides, not the name"
+
+it "keeps the verdicts when a later commit SHIFTS the lines"
+# The case above re-harvests the same fixture, so the diff never moves and the
+# carry-over key is never actually tested. `line` is the position in the CURRENT
+# diff: GitHub re-anchors it when a commit shifts the code and nulls it once the
+# thread goes outdated. harvest.yml harvests everything touched in the last three
+# days, i.e. exactly the pull requests receiving commits.
+#
+# Measured before the fix: a three-line shift carried 0 of 7 verdicts. On korbyx,
+# 4 of 17 live threads already have `line` different from `original_line`.
+# `verdict_human` wins in report.sh and nothing regenerates it.
+_reharvest_after_shift() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 2 --out "$(_out_dir)"     --threads-file "$FIXTURES/threads-verdicts.json"     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  python3 -c "
+import json,sys
+p=sys.argv[1]
+d=json.load(open(p,encoding='utf-8'))
+for i, f in enumerate(d['findings']):
+    f['verdict_llm']='verdict-%d' % i
+    f['verdict_human']='Retenu-%d' % i
+json.dump(d, open(p,'w',encoding='utf-8'), indent=2, ensure_ascii=False)
+" "$(_out_dir)/test/repo/2.json" || return 1
+  # A commit lands and shifts every thread down three lines. Same file, same
+  # finding text, new position — which is what GitHub returns after a push.
+  #
+  # The fixture is opened BY THE SHELL and piped, never handed to python as a
+  # path: $FIXTURES is a POSIX path and the python on some developer machines is
+  # a native Windows build that cannot open it. The first version of this case
+  # did pass the path, the shift failed silently under `>/dev/null`, and the
+  # assertion then re-read an UNTOUCHED document and went green — under the
+  # mutant too. Which is this pull request's own title, one directory across.
+  python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for t in d['data']['repository']['pullRequest']['reviewThreads']['nodes']:
+    if isinstance(t.get('line'), int):
+        t['line'] = t['line'] + 3
+json.dump(d, sys.stdout, indent=2, ensure_ascii=False)
+" <"$FIXTURES/threads-verdicts.json" >"$(_out_dir)/shifted.json" || return 1
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 2 --out "$(_out_dir)"     --threads-file "$(_out_dir)/shifted.json"     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  # The shifted lines are printed with the counts, so a shift that did not
+  # happen cannot be mistaken for a carry-over that worked.
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+fs=d['findings']
+llm=sum(1 for i,f in enumerate(fs) if f.get('verdict_llm')=='verdict-%d' % i)
+hum=sum(1 for i,f in enumerate(fs) if f.get('verdict_human')=='Retenu-%d' % i)
+print('lines', ','.join(str(f.get('line')) for f in fs),
+      '- llm', llm, 'of', len(fs), '- human', hum, 'of', len(fs))
+" "$(_out_dir)/test/repo/2.json"
+}
+assert_contains "lines 13,23,33,43,53,63,73 - llm 7 of 7 - human 7 of 7"   "a shifted line does not lose a verdict" -- _reharvest_after_shift
+
+it "keeps the cache stamp, not just the verdict it stamps"
+# classify-verdicts.sh caches on `finding.get("verdict_llm_key") == digest`, so a
+# verdict carried over WITHOUT its stamp reads as uncached and buys a fresh model
+# call on every already-classified finding — the exact cost the carry-over exists
+# to avoid, reopened through the one field it forgot. A repeated call can also
+# return a different verdict, so the flip this PR closes comes back too.
+_reharvest_keeps_stamp() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 3 --out "$(_out_dir)"     --threads-file "$FIXTURES/threads-verdicts.json"     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+p=sys.argv[1]
+d=json.load(open(p,encoding='utf-8'))
+for i, f in enumerate(d['findings']):
+    f['verdict_llm']='v-%d' % i
+    f['verdict_llm_key']='stamp-%d' % i
+    f['verdict_llm_quote']='quote-%d' % i
+json.dump(d, open(p,'w',encoding='utf-8'), indent=2, ensure_ascii=False)
+" "$(_out_dir)/test/repo/3.json"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 3 --out "$(_out_dir)"     --threads-file "$FIXTURES/threads-verdicts.json"     --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+fs=d['findings']
+k=sum(1 for i,f in enumerate(fs) if f.get('verdict_llm_key')=='stamp-%d' % i)
+q=sum(1 for i,f in enumerate(fs) if f.get('verdict_llm_quote')=='quote-%d' % i)
+print('stamp', k, 'of', len(fs), '- quote', q, 'of', len(fs))
+" "$(_out_dir)/test/repo/3.json"
+}
+assert_contains "stamp 7 of 7 - quote 7 of 7" "the stamp travels with the verdict" -- _reharvest_keeps_stamp
