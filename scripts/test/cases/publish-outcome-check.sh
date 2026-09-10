@@ -151,3 +151,19 @@ _setup '{"total_count":0,"check_runs":[]}'
 _publish --only-if-exists --conclusion success >/dev/null 2>&1
 assert_equal "absent" "$(_state)" "absent is distinguished from created"
 assert_not_contains "--method" "a review that worked the first time stays silent" -- _calls
+
+# --- the shape guard has to check the whole shape ----------------------------
+#
+# CodeRabbit, on the pull request that added this. The guard read the first
+# eight characters and the length, so `abcdef12` followed by 32 arbitrary
+# characters passed a check whose own comment says "a 40-hex SHA". A guard that
+# looks like it checks and does not is the failure mode this file exists for,
+# and `/commits/{ref}/check-runs` takes a branch name as readily as a SHA.
+
+it "refuses a 40-character value that is not all hex"
+_setup
+assert_contains "must be a commit SHA" "trailing non-hex is caught, not just the length" -- \
+  "$SCRIPTS/publish-outcome-check.sh" --repo o/r \
+  --sha "abcdef12zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" --name n \
+  --conclusion neutral --title t --summary s
+assert_not_contains "--method" "nothing reaches the API on a malformed ref" -- _calls
