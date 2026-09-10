@@ -2,10 +2,18 @@
  "data": {
   "repository": {
    "pullRequest": {
-    "title": "KOR-95 : une PR tres commentee",
+    "title": "KOR-96 : le meme resume, orthographie comme REST le rend",
     "state": "MERGED",
     "comments": {
      "nodes": [
+      {
+       "author": {
+        "login": "github-actions[bot]",
+        "__typename": "Bot"
+       },
+       "createdAt": "2026-09-04T16:31:00Z",
+       "body": "<!-- claude-review:summary -->\n## Résumé\n\n| Severité | Compte |\n|---|---|\n| 🔴 Bloquant | 0 |\n| 🟠 Important | 0 |\n| 🟡 Suggestion | 0 |\n"
+      },
       {
        "author": {
         "login": "coderabbitai",
@@ -14,8 +22,7 @@
        "createdAt": "2026-09-04T16:05:00Z",
        "body": "Walkthrough by coderabbit, not a summary of ours."
       }
-     ],
-     "totalCount": 150
+     ]
     },
     "reviewThreads": {
      "nodes": [

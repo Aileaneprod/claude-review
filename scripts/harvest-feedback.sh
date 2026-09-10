@@ -88,7 +88,7 @@ query($owner:String!, $name:String!, $pr:Int!) {
       state
       comments(first:100) {
         totalCount
-        nodes { author { login } body createdAt }
+        nodes { author { login __typename } body createdAt }
       }
       reviewThreads(first:100) {
         nodes {
@@ -97,7 +97,7 @@ query($owner:String!, $name:String!, $pr:Int!) {
           path
           line
           comments(first:50) {
-            nodes { databaseId author { login } body createdAt }
+            nodes { databaseId author { login __typename } body createdAt }
           }
         }
       }
@@ -120,12 +120,79 @@ mkdir -p "${out_dir}/${owner}/${name}"
 
 python3 - "${work_dir}/threads.json" "${work_dir}/rest.json" \
           "${out_dir}/${owner}/${name}/${pr_number}.json" "$repo" "$pr_number" <<'PY'
+import hashlib
 import json
+import os
 import re
 import unicodedata
 import sys
 
 threads_path, rest_path, out_path, repo, pr = sys.argv[1:6]
+
+
+# A finding is identified by the file it sits in and what it says — NOT by its
+# line. This deliberately DIVERGES from the `key` classify-verdicts.sh writes,
+# which does carry the line; see below for why the divergence is the point.
+#
+# `line` comes from `reviewThreads.line`, which is the position in the CURRENT
+# diff. GitHub re-anchors it when a later commit shifts the code, and drops it to
+# `null` once the thread goes `isOutdated`. harvest.yml harvests every pull
+# request touched in the last three days — that is, precisely the ones receiving
+# commits — so the line is the least stable part of anything identifying a
+# finding that is meant to survive.
+#
+# Measured: shifting a file by three lines carried 0 of 7 verdicts across, and on
+# korbyx 4 of 17 live threads already have `line` different from
+# `original_line`. Keyed by line, a re-harvest silently drops the verdict and
+# writes the finding back as unclassified, which is the loss the comment on
+# CARRIED_OVER says is not recoverable by re-running anything.
+#
+# The finding text carries its own position in prose, so (path, text) is as
+# specific in practice and stable across commits. Both sides of the carry-over
+# are keyed by CALLING this function — old records and new findings alike — so
+# changing the formula moves both together and orphans nothing.
+def finding_key(finding):
+    digest = hashlib.sha256(
+        (finding.get("finding") or "").encode("utf-8")).hexdigest()[:8]
+    return (finding.get("path"), digest)
+
+
+# Everything a LATER pass writes onto a finding, which this one must carry over.
+#
+# This script rebuilds the whole document from the API response, so anything
+# added afterwards used to vanish the next time the pull request was touched.
+# harvest.yml harvests and then classifies every pull request updated in the
+# last three days, so an active one was re-classified from scratch every
+# morning: model calls re-spent, and verdicts free to flip between runs on the
+# page that decides. A `verdict_human` correction would have gone the same way,
+# and that one is not recoverable by re-running anything.
+#
+# Measured: re-harvesting the ledger by hand returned 44 findings that carried a
+# model verdict as `unknown`, and moved the published precision for a reason
+# that had nothing to do with the reviewer.
+# `verdict_llm_key` is the cache stamp classify-verdicts.sh writes beside
+# `verdict_llm`, and forgetting it re-spent exactly what this tuple exists to
+# save: the check there is `finding.get("verdict_llm_key") == digest`, so a
+# carried-over verdict WITHOUT its stamp reads as uncached and buys a fresh model
+# call on every already-classified finding — and a repeated call can return a
+# different verdict, reopening "verdicts free to flip between runs" too. The
+# stamp digests the finding text and the reply, not the position, so carrying it
+# is safe across the re-anchoring described on finding_key above.
+CARRIED_OVER = ("key", "verdict_llm", "verdict_llm_key", "verdict_llm_quote",
+                "verdict_keyword", "verdict_human")
+
+previous = {}
+if os.path.exists(out_path):
+    try:
+        with open(out_path, encoding="utf-8") as fh:
+            for finding in (json.load(fh).get("findings") or []):
+                if isinstance(finding, dict):
+                    previous[finding_key(finding)] = finding
+    except (OSError, ValueError):
+        # An unreadable previous document is not a reason to fail the harvest.
+        # It costs a re-classification, which is exactly what this avoids in the
+        # ordinary case, and nothing else.
+        previous = {}
 
 with open(threads_path, encoding="utf-8") as fh:
     doc = json.load(fh)
@@ -251,10 +318,47 @@ SUMMARY_MARKER = "<!-- claude-review:summary -->"
 # marker three times in its own body. A presence flag that a passer-by can set is
 # not evidence, and it inflates the one number the whole ledger exists to answer.
 #
-# These two logins are the only accounts post-review.sh can run as: the Claude
+# These two accounts are the only ones post-review.sh can run as: the Claude
 # GitHub App when `use_github_app` is true, and the workflow's own token
-# otherwise. Both end in `[bot]`, which GitHub does not allow in a human login.
-OUR_POSTERS = ("claude[bot]", "github-actions[bot]")
+# otherwise.
+#
+# The account TYPE is what the guard rests on, not the spelling of the login.
+# Measured on korbyx#92 and korbyx#139:
+#
+#     GraphQL  author.login = "github-actions"        __typename = Bot
+#     REST     user.login   = "github-actions[bot]"   type       = Bot
+#
+# The login alone is NOT enough, and the reason is concrete: `claude` is a real
+# human account. `gh api users/claude` returns type `User`, created 2009-05-07,
+# and `user(login:"claude")` resolves in GraphQL where `user(login:"github-actions")`
+# returns NOT_FOUND. So a comment from that account carrying the marker above would
+# have set the presence flag — exactly the passer-by this block says must not be
+# able to set it, moved from the marker text to the account name.
+#
+# `__typename` is the one property a human account cannot hold, and it costs one
+# word in the query. It is requested on every `author` the query selects.
+#
+# The suffix is still tolerated below, because the two GitHub APIs disagree about
+# it and this file reads the one that omits it. That tolerance is now a
+# convenience, not the guard.
+#
+# The first version of this guard compared against the REST spelling and rejected
+# every real summary — 116 documents harvested, zero presence recorded — while
+# its test passed, because the fixture had been "corrected" to the REST spelling
+# at the same time. Fixture and code were wrong together, which is the failure
+# this repository keeps writing down — and the fixtures for this guard now carry
+# `__typename` because the query asks for it, not because a test needed a field.
+OUR_POSTERS = ("claude", "github-actions")
+
+
+def posted_by_us(author):
+    author = author or {}
+    if author.get("__typename") != "Bot":
+        return False
+    login = (author.get("login") or "").lower()
+    if login.endswith("[bot]"):
+        login = login[:-len("[bot]")]
+    return login in OUR_POSTERS
 
 # One page is read, and the busiest pull request on the repository this serves
 # carries 16 comments — so this is a bound, not a live problem. It is reported
@@ -274,13 +378,20 @@ our_summary_at = None
 for comment in seen_comments:
     if not isinstance(comment, dict):
         continue
-    login = ((comment.get("author") or {}).get("login") or "").lower()
-    if login not in OUR_POSTERS:
+    if not posted_by_us(comment.get("author")):
         continue
     if SUMMARY_MARKER in (comment.get("body") or ""):
         # The sticky is upserted in place, so there is normally exactly one.
         # Take the last if a stray duplicate survives collapsing.
         our_summary_at = comment.get("createdAt") or our_summary_at
+
+for finding in records:
+    kept = previous.get(finding_key(finding))
+    if not kept:
+        continue
+    for field in CARRIED_OVER:
+        if kept.get(field) is not None and finding.get(field) is None:
+            finding[field] = kept[field]
 
 out = {
     "repo": repo,
