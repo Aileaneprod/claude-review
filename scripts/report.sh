@@ -64,6 +64,7 @@ since=""
 since_given=0
 since_note=""
 gold_agreement=""
+gold_agreement_given=0
 out_file=""
 
 die() { printf 'report: %s\n' "$1" >&2; exit 1; }
@@ -75,7 +76,7 @@ while [ "$#" -gt 0 ]; do
     --theirs) [ "$#" -ge 2 ] || die "--theirs requires a value"; theirs="$2";     shift 2 ;;
     --since)  [ "$#" -ge 2 ] || die "--since requires a value";  since="$2"; since_given=1; shift 2 ;;
     --since-note) [ "$#" -ge 2 ] || die "--since-note requires a value"; since_note="$2"; shift 2 ;;
-    --gold-agreement) [ "$#" -ge 2 ] || die "--gold-agreement requires a value"; gold_agreement="$2"; shift 2 ;;
+    --gold-agreement) [ "$#" -ge 2 ] || die "--gold-agreement requires a value"; gold_agreement="$2"; gold_agreement_given=1; shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
     -h|--help) sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
@@ -87,18 +88,31 @@ done
 
 # Fail closed, like --since: a malformed fraction must not be read as "no
 # score", because "no score" prints a page that looks complete.
-if [ -n "$gold_agreement" ]; then
+#
+# The first version of this guard was two case patterns and let three things
+# through, all found on the pull request that introduced it: a bare "46" (no
+# slash) matched neither pattern and crashed the Python with an unpack error —
+# exit 1 and a traceback; an empty value was read as the flag being absent;
+# and "46/45" rendered as 102.2% and passed the gate. The shape is admitted
+# positively now — digits, one slash, digits — and the two arithmetic
+# constraints are checked here, in the shell, before anything is rendered.
+gold_fail() { printf 'report: --gold-agreement %s (got "%s").\n' "$1" "$gold_agreement" >&2; exit 2; }
+if [ "$gold_agreement_given" -eq 1 ]; then
   case "$gold_agreement" in
-    *[!0-9/]*|*/*/*|/*|*/|"")
-      printf 'report: --gold-agreement needs "agreed/checked", got "%s".' "$gold_agreement" >&2
-      printf '%s' "" >&2; echo >&2
-      exit 2 ;;
+    [0-9]*/[0-9]*) : ;;
+    *) gold_fail 'needs "agreed/checked" — digits, one slash, digits' ;;
   esac
-  case "${gold_agreement#*/}" in 0|0*)
-      printf 'report: --gold-agreement checked nothing ("%s"); a gold set that matches nothing is not a score.' "$gold_agreement" >&2
-      echo >&2
-      exit 2 ;;
+  case "$gold_agreement" in
+    *[!0-9/]*|*/*/*) gold_fail 'needs "agreed/checked" — digits, one slash, digits' ;;
   esac
+  gold_agreed="${gold_agreement%/*}"
+  gold_checked="${gold_agreement#*/}"
+  case "$gold_checked" in
+    0|0*) gold_fail 'checked nothing; a gold set that matches nothing is not a score' ;;
+  esac
+  if [ "$gold_agreed" -gt "$gold_checked" ]; then
+    gold_fail 'has more agreed than checked, which is not a fraction of anything'
+  fi
 fi
 
 # Fail closed. An empty or non-numeric freeze point used to be accepted and then
@@ -136,6 +150,18 @@ gold_agreement = os.environ.get("GOLD_AGREEMENT") or ""
 MIN_BOTH = 15
 
 
+def truncated(value, places):
+    """Truncated DOWN to `places` decimals, through Decimal so the float is not
+    what gets truncated. See pct() for the story; this is the same rule with
+    the number of places as a parameter, because the agreement row needed one
+    decimal and its first version used %.1f — which rounds, and printed 94.96%
+    as "95.0%" beside a FAIL against a 95% gate. The same bug, in the same
+    file, on the same day pct() was written to end it."""
+    quantum = decimal.Decimal(1).scaleb(-places)
+    q = decimal.Decimal(str(value)).quantize(quantum, rounding=decimal.ROUND_DOWN)
+    return "%.*f" % (places, q)
+
+
 def pct(value):
     """Two places, truncated DOWN — never rounded up toward the target.
 
@@ -152,9 +178,7 @@ def pct(value):
     """
     if value is None:
         return "n/a"
-    quantised = decimal.Decimal(str(value)).quantize(
-        decimal.Decimal("0.01"), rounding=decimal.ROUND_DOWN)
-    return "%.2f" % quantised
+    return truncated(value, 2)
 out_file = os.environ.get("OUT_FILE") or ""
 
 JUDGED = ("accepted", "partial", "rejected")
@@ -355,8 +379,8 @@ if classifier_uncertified and precision_verdict == "PASS":
 w("| Our precision on judged findings | >= 0.95 | %s | %s |"
   % (pct(ours_p), precision_verdict))
 if gold_pct is not None:
-    w("| Classifier agreement with the gold set | >= %d%% | %.1f%% (%d/%d) | %s |"
-      % (GOLD_GATE, gold_pct, gold_agreed, gold_checked,
+    w("| Classifier agreement with the gold set | >= %d%% | %s%% (%d/%d) | %s |"
+      % (GOLD_GATE, truncated(gold_pct, 1), gold_agreed, gold_checked,
          "PASS" if not classifier_uncertified else "FAIL"))
 w("| Pull requests reviewed by both | >= %d | %d | %s |"
   % (MIN_BOTH, both_reviewed, "PASS" if enough else "not yet"))

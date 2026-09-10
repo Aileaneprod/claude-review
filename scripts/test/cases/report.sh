@@ -433,3 +433,36 @@ assert_not_contains "Classifier agreement" "no flag, no row" -- _report
 it "refuses a malformed --gold-agreement"
 assert_status 2 "not a fraction" -- _report --gold-agreement "82.6%"
 assert_status 2 "zero checked" -- _report --gold-agreement 0/0
+
+# --- three holes in the fraction guard, found on the pull request ------------
+#
+# Both reviewers, within an hour of the guard being written. A bare number
+# slipped every case pattern and crashed the Python with an unpack error —
+# exit 1 and a traceback, not the exit 2 the block exists to guarantee. An
+# empty value was read as "no flag" and printed a complete-looking page. And
+# 46/45 rendered as 102.2% and PASSED. None of the three was covered, which is
+# the lesson: the guard's own tests were the two malformed shapes its author
+# had thought of.
+
+it "refuses a fraction with no slash"
+assert_status 2 "a bare number is not a fraction" -- _report --gold-agreement 46
+assert_not_contains "Traceback" "and it dies cleanly, not in Python" -- _report --gold-agreement 46
+
+it "refuses an empty --gold-agreement rather than reading it as absent"
+assert_status 2 "empty is an error, exactly as it is for --since" -- _report --gold-agreement ""
+
+it "refuses more agreed than checked"
+assert_status 2 "46 of 45 is not a score" -- _report --gold-agreement 46/45
+
+it "does not round the agreement up to the gate it misses"
+# 9496/10000 is 94.96%, below the 95% gate. Rounded to one place it prints
+# 95.0% beside a FAIL — the exact cell pct() was written to prevent, three
+# hundred lines up, in the same file, the same day.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't', 'reviewed_by_ours': True,
+                  'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                                'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| 94.9% (9496/10000) | FAIL |" "94.96 prints as 94.9, not 95.0" -- _report --gold-agreement 9496/10000
