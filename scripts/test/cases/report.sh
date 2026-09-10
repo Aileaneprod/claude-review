@@ -466,3 +466,21 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't', 'reviewed
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
 assert_contains "| 94.9% (9496/10000) | FAIL |" "94.96 prints as 94.9, not 95.0" -- _report --gold-agreement 9496/10000
+
+# --- and two more, on the commit that closed the first three -----------------
+#
+# `[ -gt ]` on a 20-digit operand prints "integer expected" and returns 2 — and
+# inside an `if`, that is simply false. set -e does not fire. So an oversized
+# "agreed" sailed past the comparison and the page printed
+# `10000000000000000000000.0% | PASS`. A gold set has dozens of entries, not
+# quintillions; a side longer than nine digits is not a score of anything.
+# And "agreed" had no leading-zero guard while "checked" did.
+
+it "refuses a fraction whose digits would overflow the shell comparison"
+assert_status 2 "twenty digits of agreed is not a score" -- _report --gold-agreement 99999999999999999999/1
+assert_status 2 "twenty digits of checked is not a score" -- _report --gold-agreement 1/99999999999999999999
+
+it "refuses leading zeros on agreed, as it already did on checked"
+assert_status 2 "007 is not how a count is written" -- _report --gold-agreement 007/46
+assert_status 2 "nor is 00" -- _report --gold-agreement 00/46
+assert_contains "| 0.0% (0/46) | FAIL |" "but a bare zero is a real score" -- _report --gold-agreement 0/46

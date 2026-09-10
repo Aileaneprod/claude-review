@@ -107,6 +107,21 @@ if [ "$gold_agreement_given" -eq 1 ]; then
   esac
   gold_agreed="${gold_agreement%/*}"
   gold_checked="${gold_agreement#*/}"
+  # Nine digits a side, at most. A gold set has dozens of entries, and the
+  # shell's `-gt` on a twenty-digit operand prints "integer expected" and
+  # returns 2 — which inside an `if` is merely false, and set -e stays quiet.
+  # An oversized value therefore walked past the comparison and the page
+  # printed "10000000000000000000000.0% | PASS". Bounding the length keeps
+  # every later comparison inside what the shell can actually compare.
+  if [ "${#gold_agreed}" -gt 9 ] || [ "${#gold_checked}" -gt 9 ]; then
+    gold_fail 'has more than nine digits on a side, which no gold set has'
+  fi
+  # A count is written without leading zeros on either side; a bare 0 is a
+  # real value for agreed (nothing agreed) and never for checked.
+  case "$gold_agreed" in
+    0) : ;;
+    0*) gold_fail 'writes agreed with a leading zero, which is not how a count is written' ;;
+  esac
   case "$gold_checked" in
     0|0*) gold_fail 'checked nothing; a gold set that matches nothing is not a score' ;;
   esac
