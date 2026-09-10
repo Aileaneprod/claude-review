@@ -225,6 +225,30 @@ replacements = {
     "{{CHANGED_FILES}}": changed_block,
 }
 
+# Every token this script substitutes must be PRESENT in the template, and that
+# is checked BEFORE any replacement. The check further down, on what is left
+# over afterwards, only catches a token that SURVIVED — it cannot see one that
+# was DELETED from base.md, because a deleted token is not left over either.
+#
+# Measured by Theo on this branch, before this check existed — his figures, not
+# re-measured here, because build-prompt.sh cannot run on the machine this was
+# written on: it hands its own POSIX path to python, and the python here is a
+# native Windows build. Removing {{LEARNINGS}} lost 10,790 bytes of prompt and
+# still exited 0, announcing "learnings: 2 source(s)" on the way out; removing
+# {{CHANGED_FILES}} left the "Review only these files" section empty and still
+# announced "files in scope". The reviewer then runs without its memory, or
+# without a scope, and nothing says so. The case in
+# scripts/test/cases/build-prompt.sh is what re-proves this in CI.
+#
+# So the assembly contract is explicit: base.md carries all of these, and a
+# section removed there is removed from `replacements` in the same commit.
+missing = [t for t in replacements if t not in template]
+if missing:
+    sys.stderr.write(
+        "build-prompt: template is missing tokens: %s\n"
+        % ", ".join(sorted(missing)))
+    sys.exit(1)
+
 for token, value in replacements.items():
     template = template.replace(token, value)
 

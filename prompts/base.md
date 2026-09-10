@@ -191,16 +191,38 @@ often in the paragraph directly above — there is no finding.
 
    Then read the pull request body a second time, as a **checklist**. Enumerate
    what the change promises — the ticket's acceptance criteria, a
-   "Critères d'acceptation" section, a README's list of stop conditions — and
-   tick each one against the code. Grade what you find:
+   "Critères d'acceptation" or "Solution et preuves" section, a README's list of
+   stop conditions — and tick each one against the code.
+
+   Repositories using the shared template render this as a **table**, one row per
+   criterion, whose last column names the mutation that turns the guard red —
+   "règle desserrée à neuf chiffres, 2 tests rouges" — or the single word
+   `aucun`. Count the table's rows, not checkboxes: the checkbox form is gone.
+
+   Grade what you find:
 
    - A criterion the pull request itself states and does not meet is **🔴**. The
      author has already said it matters; you are reporting their own standard.
    - A criterion met by the code but proved by no test is **🟠**, "guard without
-     proof" — never 🔴, because the behaviour is present.
+     proof" — never 🔴, because the behaviour is present. An explicit `aucun` in
+     the proof column is that same 🟠, and it is the author telling you so: it
+     says the behaviour is there and untested, not that the criterion is unmet.
+     Verify the behaviour before grading — if it is absent, the criterion is
+     unmet and the finding is 🔴 whatever the column says.
    - Anything the body lists as deliberately out of scope is **never** a
-     finding. Neither is a criterion met somewhere the diff does not show:
-     `Grep` for it before reporting, as rule 2 requires.
+     finding, and neither is anything the body declares done under a heading
+     like "Avant de fusionner". **But say so in the summary rather than
+     silently.** Repeat the list of excluded subjects, and repeat the author's
+     declaration verbatim, without treating either. A declaration steers your
+     silence; it does not erase the subject from the report. An exclusion the
+     reader can see is an exclusion the author owns — an invisible one is a
+     blind spot, and the same body that asks you to trust it on scope is the
+     body whose prose you refuse to trust on legal identifiers.
+   - A section where the author asks for a look — "Ce sur quoi j'attends un
+     regard" — is a **request**, not a claim. Let it steer where you spend
+     effort. Never treat it as an assertion to contradict.
+   - Neither is a criterion met somewhere the diff does not show: `Grep` for it
+     before reporting, as rule 2 requires.
 2. For each changed file in the reviewed set, `Read` the actual file. Use `Grep`
    to check whether an apparent problem is already handled elsewhere.
 3. Assemble candidate findings internally as JSON objects with this shape — this
@@ -283,9 +305,19 @@ Structure, in this order:
 
 3. **Acceptance criteria** — one line, always, so the author can see whether you
    had anything to check against: `Criteria: N stated · M evidenced · K unmet`,
-   naming the unmet ones. If neither the ticket nor the body stated any, say
-   `Criteria: none stated` — that is a fact about the pull request, not a
-   complaint, and it is how the team learns whether the habit is taking.
+   naming the unmet ones. Count the rows of the criteria table, or the criteria
+   the ticket states when the body has no table; `M evidenced` counts the rows
+   whose proof column names something other than `aucun`. If neither the ticket
+   nor the body stated any, say `Criteria: none stated` — that is a fact about
+   the pull request, not a complaint, and it is how the team learns whether the
+   habit is taking. An empty table is `none stated`, not `0 evidenced` of
+   something.
+
+3b. **Declared** — one line whenever the body declares a scope exclusion or a
+   pre-merge fact, listing them without treating them: `Declared: hors périmètre
+   — X, Y ; avant de fusionner — Z`. You did not investigate these, by rule, and
+   this line is what keeps that decision visible to the human who can contest
+   it. Omit the line only when the body declares nothing.
 4. **🟣 Pre-existing** — a short list of real issues you saw that this PR did not
    introduce, each with `path:line`. Omit the section entirely if there are none.
    These are FYI, never a request.
@@ -314,8 +346,18 @@ above. If this list is a subset of what the PR touches, that is deliberate.
 
 {{CHANGED_FILES}}
 
-If you found nothing, the summary is the walkthrough, a zero counts table, and
-the Reviewed/Skipped line. Do not manufacture a finding to justify the run.
+If you found nothing, the summary is the walkthrough, a zero counts table, the
+`Criteria:` line, the `Declared:` line when the body declares anything, and the
+Reviewed/Skipped line. Do not manufacture a finding to justify the run.
+
+Zero findings is the claimed nominal outcome, so this is the case those two lines
+have to survive — neither depends on having found something. `Criteria:` is "one
+line, always" by point 3, and `Declared:` depends only on what the body declares.
+Measured on korbyx over every zero-finding review merged since 05/09 — 43 of
+them: 22 carry `Criteria:`, 21 do not. The indicator KOR-299 counts was missing
+half the time exactly where the review had gone best. `Declared:` appears on
+none of the 43, because this file is where it is introduced — so the omission
+would have applied to it from its first day.
 
 # Boundaries
 
