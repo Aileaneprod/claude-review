@@ -166,4 +166,9 @@ assert_contains "must be a commit SHA" "trailing non-hex is caught, not just the
   "$SCRIPTS/publish-outcome-check.sh" --repo o/r \
   --sha "abcdef12zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz" --name n \
   --conclusion neutral --title t --summary s
-assert_not_contains "--method" "nothing reaches the API on a malformed ref" -- _calls
+# `--method` alone would be a hollow assertion: the lookup call carries no
+# `--method`, so it passes just as well against a script that asks the API
+# about a malformed ref and only then refuses it. Measured by moving the guard
+# below the lookup — 22 passed, 0 failed. `check-runs` is in every call this
+# script makes, so it is the part that witnesses the order.
+assert_not_contains "check-runs" "nothing reaches the API on a malformed ref" -- _calls
