@@ -90,8 +90,8 @@ done
 # 404 on a DIFFERENT endpoint — a confusing failure for a step whose whole job
 # is to be unconfusing. Refuse it here, by shape, where the reason can be said.
 case "$sha" in
-  [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) : ;;
-  *) die "--sha must be a commit SHA (got '${sha}')" ;;
+  "")          die "--sha must be a commit SHA (got '')" ;;
+  *[!0-9a-f]*) die "--sha must be a commit SHA (got '${sha}')" ;;
 esac
 [ "${#sha}" -eq 40 ] || die "--sha must be a 40-character commit SHA (got ${#sha} characters)"
 
