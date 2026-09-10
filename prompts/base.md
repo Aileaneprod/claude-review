@@ -346,8 +346,18 @@ above. If this list is a subset of what the PR touches, that is deliberate.
 
 {{CHANGED_FILES}}
 
-If you found nothing, the summary is the walkthrough, a zero counts table, and
-the Reviewed/Skipped line. Do not manufacture a finding to justify the run.
+If you found nothing, the summary is the walkthrough, a zero counts table, the
+`Criteria:` line, the `Declared:` line when the body declares anything, and the
+Reviewed/Skipped line. Do not manufacture a finding to justify the run.
+
+Zero findings is the claimed nominal outcome, so this is the case those two lines
+have to survive — neither depends on having found something. `Criteria:` is "one
+line, always" by point 3, and `Declared:` depends only on what the body declares.
+Measured on korbyx over every zero-finding review merged since 05/09 — 43 of
+them: 22 carry `Criteria:`, 21 do not. The indicator KOR-299 counts was missing
+half the time exactly where the review had gone best. `Declared:` appears on
+none of the 43, because this file is where it is introduced — so the omission
+would have applied to it from its first day.
 
 # Boundaries
 
