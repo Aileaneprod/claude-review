@@ -381,3 +381,55 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                   'reviewed_by_ours': True, 'findings': findings}))
 " | _seed
 assert_contains "| **precision** | **0.29** |" "29 of 100 is 0.29, not 0.28" -- _report
+
+# --- the classifier's own score belongs on the page -------------------------
+#
+# The precision row is computed from verdicts a classifier produced, and that
+# classifier was below its gate for four days running without the page saying
+# a word. A precision that rests on an unproven classifier is provisional, and
+# the page has to say so where the number is, not in a job annotation.
+
+it "prints the classifier's agreement as a criterion row"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't', 'reviewed_by_ours': True,
+                  'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                                'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Classifier agreement with the gold set | >= 95% | 82.6% (38/46) | FAIL |" \
+  "the score is a row in the table" -- _report --gold-agreement 38/46
+
+it "marks precision provisional while the classifier is below its gate"
+# Fifteen pull requests reviewed by both, all accepted: a window that has EARNED
+# a PASS on precision. That is the only case the marker changes — a thin window
+# already reads "not yet" and needs no second reason.
+rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+python3 -c "
+import json, sys
+for pr in range(1, 16):
+    json.dump({'repo': 'Aileaneprod/korbyx', 'pr': pr, 'title': 't', 'reviewed_by_ours': True,
+               'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                             'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                             'verdict_keyword': 'accepted'},
+                            {'reviewer': 'coderabbitai', 'path': 'b.ts', 'line': 2,
+                             'finding': '🟠 Important — y', 'author_reply': 'Retenu',
+                             'verdict_keyword': 'accepted'}]},
+              open('%s/%d.json' % (sys.argv[1], pr), 'w', encoding='utf-8'))
+" "$(_led)/Aileaneprod/korbyx"
+assert_contains "| Our precision on judged findings | >= 0.95 | 1.00 | PASS |" \
+  "the window has earned a PASS on its own" -- _report
+assert_contains "| Our precision on judged findings | >= 0.95 | 1.00 | not yet (provisional) |" \
+  "a precision built on a failing classifier says so" -- _report --gold-agreement 38/46
+
+it "leaves precision alone when the classifier passes"
+assert_contains "| Classifier agreement with the gold set | >= 95% | 100.0% (46/46) | PASS |" \
+  "a passing classifier passes" -- _report --gold-agreement 46/46
+assert_not_contains "provisional" "and precision is no longer provisional" -- _report --gold-agreement 46/46
+
+it "prints no classifier row when it was not told a score"
+assert_not_contains "Classifier agreement" "no flag, no row" -- _report
+
+it "refuses a malformed --gold-agreement"
+assert_status 2 "not a fraction" -- _report --gold-agreement "82.6%"
+assert_status 2 "zero checked" -- _report --gold-agreement 0/0

@@ -173,3 +173,35 @@ it "refuses LLM mode without a credential rather than silently degrading"
 _seed 'Retenu.'
 assert_contains "ANTHROPIC_API_KEY" "says what is missing" -- \
   env -u ANTHROPIC_API_KEY "$SCRIPTS/classify-verdicts.sh" --ledger "$(_ledger)"
+
+# --- the agreement has to reach the page ------------------------------------
+#
+# The gate ran every day from 2026-09-07 to 2026-09-10 at 82.6% (38/46), below
+# the 95% threshold, with the same eight disagreements each morning — and the
+# published page never said so. The step is continue-on-error and its only
+# output was a job annotation nobody opens. The precision figure on the page
+# rests on this classifier, so the classifier's score belongs next to it.
+
+it "writes the agreement fraction to --agreement-out"
+_seed 'Retenu, et corrigé.'
+"$SCRIPTS/classify-verdicts.sh" --ledger "$(_ledger)" --keyword-only >/dev/null 2>&1
+python3 -c "
+import json, sys
+json.dump({sys.argv[1]: 'accepted'}, open(sys.argv[2], 'w', encoding='utf-8'))
+" "$(_goldkey)" "$(_ledger)/gold.json"
+rm -f "$TESTTMP/agreement"
+"$SCRIPTS/classify-verdicts.sh" --ledger "$(_ledger)" --keyword-only \
+  --gold "$(_ledger)/gold.json" --agreement-out "$TESTTMP/agreement" >/dev/null 2>&1 || true
+assert_equal "1/1" "$(cat "$TESTTMP/agreement" 2>/dev/null || echo MISSING)" "the fraction is written as agreed/checked"
+
+it "still writes the fraction when the gate fails"
+# The whole point is to publish a BAD score. A file only written on success
+# would hide exactly the case that matters.
+python3 -c "
+import json, sys
+json.dump({sys.argv[1]: 'rejected'}, open(sys.argv[2], 'w', encoding='utf-8'))
+" "$(_goldkey)" "$(_ledger)/gold.json"
+rm -f "$TESTTMP/agreement"
+"$SCRIPTS/classify-verdicts.sh" --ledger "$(_ledger)" --keyword-only \
+  --gold "$(_ledger)/gold.json" --min-agreement 95 --agreement-out "$TESTTMP/agreement" >/dev/null 2>&1 || true
+assert_equal "0/1" "$(cat "$TESTTMP/agreement" 2>/dev/null || echo MISSING)" "a failing gate still reports its fraction"
