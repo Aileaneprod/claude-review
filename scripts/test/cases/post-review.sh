@@ -33,10 +33,24 @@ _setup() {
   export GH_REVIEW_COMMENTS="$TESTTMP/pr-review-comments.json"
   : > "$GH_LOG"
   printf '%s' "${1:-[]}" > "$GH_ISSUE_COMMENTS"
+  # $2 may name several fixtures, comma-separated: one per GraphQL call, so a
+  # paginated read can be exercised. The literal FAIL makes that call exit 1.
+  export GH_THREADS_DIR="$TESTTMP/threads"
+  rm -rf "$GH_THREADS_DIR"; mkdir -p "$GH_THREADS_DIR"
   if [ -n "${2:-}" ]; then
-    cp "$FIXTURES/$2" "$GH_THREADS"
+    local n=0 name
+    while IFS= read -r name; do
+      n=$((n + 1))
+      if [ "$name" = "FAIL" ]; then
+        printf '%s' 'FAIL' > "$GH_THREADS_DIR/$n"
+      else
+        cp "$FIXTURES/$name" "$GH_THREADS_DIR/$n"
+      fi
+    done < <(printf '%s\n' "$2" | tr ',' '\n')
+    cp "$GH_THREADS_DIR/1" "$GH_THREADS"
   else
     printf '%s' '{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false},"nodes":[]}}}}}' > "$GH_THREADS"
+    cp "$GH_THREADS" "$GH_THREADS_DIR/1"
   fi
   if [ -n "${3:-}" ]; then
     cp "$FIXTURES/$3" "$GH_REVIEW_COMMENTS"
@@ -48,7 +62,17 @@ _setup() {
   gh() {
     echo "$*" >> "$GH_LOG"
     case "$*" in
-      *graphql*)               cat "$GH_THREADS" ;;
+      *graphql*)
+        local i page
+        i=$(( $(cat "$GH_THREADS_DIR/count" 2>/dev/null || echo 0) + 1 ))
+        printf '%s' "$i" > "$GH_THREADS_DIR/count"
+        page="$GH_THREADS_DIR/$i"
+        [ -f "$page" ] || page="$GH_THREADS_DIR/1"
+        if [ "$(cat "$page")" = "FAIL" ]; then
+          echo "GraphQL: Something went wrong" >&2
+          return 1
+        fi
+        cat "$page" ;;
       *--method*)              echo '{}' ;;
       *issues/*/comments*)     cat "$GH_ISSUE_COMMENTS" ;;
       *pulls/*/comments*)      cat "$GH_REVIEW_COMMENTS" ;;
@@ -254,6 +278,49 @@ assert_not_contains "on y reviendra" "the reply is not a finding" -- _ledger sum
 it "keeps the finding the reply hangs off"
 _setup "[]" "" review-comments-with-reply.json
 assert_contains "analytic-units.ts" "the finding itself is still recorded" -- _ledger summary-french.json
+
+# --- the read has to be whole, and say so when it is not ---------------------
+
+_pre_then_post() {
+  "$SCRIPTS/post-review.sh" --mode pre --repo o/r --pr 1 \
+    --out "$TESTTMP/prior.md" --live-counts-out "$TESTTMP/prior-live.json" \
+    >/dev/null 2>&1
+  "$SCRIPTS/post-review.sh" --mode post --repo o/r --pr 1 \
+    --execution-file "$FIXTURES/$1" --prior-live "$TESTTMP/prior-live.json" \
+    --dry-run 2>/dev/null
+}
+
+INCOMPLETE_NOTE="could not all be read"
+
+it "reads past the first page of review threads"
+# One page holds 100 threads. A finding on the second page is a finding still
+# standing, and counting only the first page quietly under-reports the verdict.
+_setup "[]" "threads-page1.json,threads-page2.json"
+assert_contains '"nit": 1' "the second page is counted too" -- _pre_counts
+
+it "says on the page when the earlier findings could not all be read"
+# The degraded path must not pass for a standing verdict. Writing no counts and
+# publishing the table anyway retracts the earlier findings exactly as before
+# this change; refusing to post at all would announce a completed review as
+# unavailable. Publishing, and saying what is missing, is the only honest one.
+_setup "[]" "threads-page1.json,FAIL"
+assert_contains "$INCOMPLETE_NOTE" "the reader is told the count may be low" -- _pre_then_post summary-french.json
+
+it "keeps that caveat off the page when the read was whole"
+_setup "[]" threads-prior-mixed.json
+assert_not_contains "$INCOMPLETE_NOTE" "a complete read says nothing" -- _pre_then_post summary-french.json
+
+it "does not announce a finding as gone when GitHub merely moved its line"
+# `reviewThreads.line` is the position in the CURRENT diff: GitHub re-anchors it
+# when a later commit shifts the code and drops it to null once the thread goes
+# outdated — harvest-feedback.sh:135-148 measured 4 of 17 live threads on korbyx
+# already differing from original_line. Keying the ledger against it lists the
+# same finding twice: once under its real group, once as "not among the current
+# threads", which is the lie the grouping exists to avoid. Routine on any
+# multi-push pull request, so on exactly what this change is built for.
+_setup "$(cat "$FIXTURES/issue-comments-ledger-shifted.json")" threads-prior-mixed.json
+assert_not_contains "not among the pull request's current threads" \
+  "a thread that moved is not a thread that vanished" -- _pre
 
 it "still lists every prior finding whoever posted it, so none gets reposted"
 # The dedup list is deliberately wider than the count: we must not repeat

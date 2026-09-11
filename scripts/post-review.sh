@@ -145,19 +145,20 @@ PY
 #
 # Only the opening comment of each thread is read. It is the finding; the
 # replies are the conversation about it.
-fetch_threads() {
-  local dest="$1" owner name
-  owner="${repo%%/*}"
-  name="${repo##*/}"
-  # shellcheck disable=SC2016
-  # Single-quoted on purpose: $owner, $name and $pr are GraphQL variables bound
-  # by -F and must reach the server unexpanded.
-  if ! gh api graphql -F owner="$owner" -F name="$name" -F pr="$pr_number" -f query='
-query($owner:String!, $name:String!, $pr:Int!) {
+# Ten pages of a hundred. The busiest pull request this has run against carried
+# 28 review comments, so this is a bound and not a live constraint — but an
+# unbounded loop against a paginated API is not something to leave to chance.
+THREAD_PAGE_LIMIT=10
+
+# shellcheck disable=SC2016
+# Single-quoted on purpose: $owner, $name, $pr and $after are GraphQL variables
+# bound by the flags below and must reach the server unexpanded.
+THREADS_QUERY='
+query($owner:String!, $name:String!, $pr:Int!, $after:String) {
   repository(owner:$owner, name:$name) {
     pullRequest(number:$pr) {
-      reviewThreads(first:100) {
-        pageInfo { hasNextPage }
+      reviewThreads(first:100, after:$after) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           isResolved
           isOutdated
@@ -170,11 +171,82 @@ query($owner:String!, $name:String!, $pr:Int!) {
       }
     }
   }
-}' >"$dest" 2>"${dest}.err"; then
-    printf 'post-review: warning: could not read the review threads\n' >&2
-    sed 's/^/post-review:   /' "${dest}.err" >&2 || true
-    printf '%s' '{}' >"$dest"
+}'
+
+fetch_threads() {
+  local dest="$1" owner name cursor="" page=0 complete=true dir
+  owner="${repo%%/*}"
+  name="${repo##*/}"
+  dir="${dest}.d"
+  rm -rf "$dir"
+  mkdir -p "$dir"
+
+  while [ "$page" -lt "$THREAD_PAGE_LIMIT" ]; do
+    page=$((page + 1))
+    local args=(api graphql -F owner="$owner" -F name="$name" -F pr="$pr_number")
+    if [ -z "$cursor" ]; then
+      # `gh help api`: the literal values true, false, null and integers get
+      # converted to their JSON types. A cursor goes through -f instead, so the
+      # same conversion can never reinterpret one that happens to read as a
+      # number.
+      args+=(-F after=null)
+    else
+      args+=(-f after="$cursor")
+    fi
+    args+=(-f query="$THREADS_QUERY")
+
+    if ! gh "${args[@]}" >"${dir}/${page}.json" 2>"${dest}.err"; then
+      printf 'post-review: warning: could not read review threads, page %d\n' "$page" >&2
+      sed 's/^/post-review:   /' "${dest}.err" >&2 || true
+      rm -f "${dir}/${page}.json"
+      complete=false
+      break
+    fi
+
+    cursor="$(python3 -c '
+import json, sys
+document = json.load(open(sys.argv[1], encoding="utf-8"))
+info = ((((document.get("data") or {}).get("repository") or {})
+         .get("pullRequest") or {}).get("reviewThreads") or {}).get("pageInfo") or {}
+print((info.get("endCursor") or "") if info.get("hasNextPage") else "")
+' "${dir}/${page}.json")"
+    [ -n "$cursor" ] || break
+  done
+
+  if [ -n "$cursor" ]; then
+    printf 'post-review: warning: stopped after %d pages of review threads\n' \
+      "$THREAD_PAGE_LIMIT" >&2
+    complete=false
   fi
+
+  # One normalised document, so nothing downstream has to know this was paged:
+  # {"complete": bool, "nodes": [...]}. `complete` is false when a page failed
+  # or the limit was hit, and the summary says so rather than quietly publishing
+  # a count taken from part of the pull request.
+  python3 - "$dir" "$dest" "$complete" <<'PY'
+import glob
+import json
+import os
+import sys
+
+directory, out_path, complete = sys.argv[1:4]
+
+nodes = []
+for path in sorted(glob.glob(os.path.join(directory, "*.json")),
+                   key=lambda p: int(os.path.basename(p).split(".")[0])):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            document = json.load(handle)
+    except (OSError, ValueError):
+        complete = "false"
+        continue
+    container = ((((document.get("data") or {}).get("repository") or {})
+                  .get("pullRequest") or {}).get("reviewThreads") or {})
+    nodes.extend(container.get("nodes") or [])
+
+with open(out_path, "w", encoding="utf-8", newline="\n") as handle:
+    json.dump({"complete": complete == "true", "nodes": nodes}, handle)
+PY
 }
 
 # ---------------------------------------------------------------------------
@@ -263,14 +335,9 @@ counts = dict((name, 0) for _, name in SEVERITIES)
 seen = set()
 
 threads = load(threads_path, {})
-container = ((((threads.get("data") or {}).get("repository") or {})
-              .get("pullRequest") or {}).get("reviewThreads") or {})
+complete = bool(threads.get("complete", True))
 
-if (container.get("pageInfo") or {}).get("hasNextPage"):
-    sys.stderr.write("post-review: warning: this pull request has more than 100 "
-                     "review threads; the prior-findings list is incomplete\n")
-
-for thread in container.get("nodes") or []:
+for thread in threads.get("nodes") or []:
     opener = ((thread.get("comments") or {}).get("nodes") or [None])[0]
     if not opener:
         continue
@@ -278,7 +345,15 @@ for thread in container.get("nodes") or []:
     if not title:
         continue
     path, line = thread.get("path"), thread.get("line")
-    seen.add((path, line, title))
+    # Keyed WITHOUT the line, and that is the point. `reviewThreads.line` is the
+    # position in the CURRENT diff: GitHub re-anchors it when a later commit
+    # shifts the code and drops it to null once the thread is outdated.
+    # harvest-feedback.sh reaches the same conclusion from measurement — on
+    # korbyx, 4 of 17 live threads already differ from `original_line` — and
+    # keys its findings (path, digest of the text) for exactly this reason.
+    # Keyed by line, a ledger entry stops matching its own thread the moment the
+    # file moves, and gets listed a second time as a finding that has vanished.
+    seen.add((path, title))
     entry = "- `%s` — %s" % (where(path, line), title)
     if not posted_by_us(opener.get("author")):
         theirs.append(entry)
@@ -308,7 +383,7 @@ for comment in load(issue_path, []):
     except Exception:
         continue
     for item in payload.get("findings", []):
-        key = (item.get("path"), item.get("line"), item.get("title"))
+        key = (item.get("path"), item.get("title"))
         if key in seen:
             continue
         seen.add(key)
@@ -340,15 +415,17 @@ with open(out_path, "w", encoding="utf-8", newline="\n") as handle:
     handle.write(text + ("\n" if text else ""))
 
 if counts_path:
+    payload = dict(counts)
+    payload["complete"] = complete
     with open(counts_path, "w", encoding="utf-8", newline="\n") as handle:
-        json.dump(counts, handle, indent=1, sort_keys=True)
+        json.dump(payload, handle, indent=1, sort_keys=True)
         handle.write("\n")
 
 sys.stderr.write(
     "post-review: %d prior finding(s) loaded; %d still standing and ours "
-    "(%d blocking, %d important, %d nit)\n"
+    "(%d blocking, %d important, %d nit); read %s\n"
     % (len(seen), len(ours_live), counts["blocking"], counts["important"],
-       counts["nit"]))
+       counts["nit"], "complete" if complete else "INCOMPLETE"))
 PY
   exit 0
 fi
@@ -464,11 +541,23 @@ if prior_live_path and os.path.isfile(prior_live_path):
         sys.stderr.write("post-review: could not read the standing counts: %s\n" % exc)
 
 
+prior_complete = bool(prior_live.get("complete", True))
+
+
 def carried(key):
     try:
         return max(0, int(prior_live.get(key) or 0))
     except (TypeError, ValueError):
         return 0
+
+
+# Said on the page, not in a log. A count taken from part of the pull request
+# is not a standing verdict, and publishing one as if it were is the same defect
+# this whole change exists to remove — only quieter, because it would happen on
+# the days the API had a bad minute. Not posting at all was the alternative, and
+# it is worse: a completed review would be announced as unavailable.
+INCOMPLETE_NOTE = ("_The findings already on this pull request could not all be "
+                   "read this time, so the counts above may be low._")
 
 
 def with_standing(text):
@@ -479,26 +568,33 @@ def with_standing(text):
     at two different points, and adjusting only the first leaves a crashed run —
     the case the fallback exists for — publishing the wrong verdict.
     """
-    if not text or not any(carried(key) for _, key in PRIOR_SEVERITIES):
+    if not text or (prior_complete
+                    and not any(carried(key) for _, key in PRIOR_SEVERITIES)):
         return text
     rewritten = []
     added = dict((key, 0) for _, key in PRIOR_SEVERITIES)
+    last_row = -1
     for line in text.splitlines():
         for emoji, key in PRIOR_SEVERITIES:
-            extra = carried(key)
-            if not extra or emoji not in line:
+            if emoji not in line:
                 continue
             match = COUNT_ROW.match(line)
             if match:
-                line = "%s%d%s" % (match.group(1), int(match.group(2)) + extra,
-                                   match.group(3))
-                added[key] += extra
+                last_row = len(rewritten)
+                extra = carried(key)
+                if extra:
+                    line = "%s%d%s" % (match.group(1),
+                                       int(match.group(2)) + extra, match.group(3))
+                    added[key] += extra
             break
         rewritten.append(line)
+    if not prior_complete and last_row >= 0:
+        rewritten[last_row + 1:last_row + 1] = ["", INCOMPLETE_NOTE]
     sys.stderr.write(
         "post-review: carried %d blocking, %d important, %d nit still standing "
-        "from earlier runs into the counts table\n"
-        % (added["blocking"], added["important"], added["nit"]))
+        "from earlier runs into the counts table%s\n"
+        % (added["blocking"], added["important"], added["nit"],
+           "" if prior_complete else "; the read was incomplete and the summary says so"))
     return "\n".join(rewritten)
 
 issue_comments = load(issue_path)
