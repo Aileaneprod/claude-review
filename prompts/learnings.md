@@ -128,3 +128,13 @@ reported success for an account that could not sign in. The author: *"je
 vérifiais deux des trois conditions et j'ai manqué la troisième."* We reviewed
 that commit, `0618b01`, and did not raise it.
 
+
+## A claim about a platform is looked up before it carries a 🔴
+
+"GitHub does X", "bash does Y": open the docs and quote them. A 🔴 on a false
+premise costs the author an hour and the label its credibility.
+
+**Evidence:** Aileaneprod/korbyx#114, #142 — two of five 🔴. "Step
+shells run with pipefail" (they run `bash -e`; `exit 1 | tee; echo $?` → 0) and
+"`GITHUB_SHA` on `release` is the branch tip" (docs: "last commit in the tagged
+release"). Both refuted by reproduction.
