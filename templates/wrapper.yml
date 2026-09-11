@@ -106,6 +106,24 @@ jobs:
       # Check which branch is the default before changing this; it is not
       # always `main`. See the header for the full explanation.
       use_github_app: true
+
+      # Uncomment to review draft pull requests too. Off by default: a draft is
+      # not asking for review yet, and drafts churn — on korbyx one branch was
+      # pushed nine times before it was marked ready, so expect roughly to
+      # double the number of runs.
+      #
+      # Worth turning on where the OTHER reviewer on the repository already
+      # reads drafts: a draft nobody reviews is symmetric, a draft only one
+      # reviewer reads makes ours look absent for no reason.
+      #
+      # It belongs here and not in `.claude-review.yml`, because the guard is a
+      # job-level `if:` evaluated before any checkout — the only things it can
+      # read are these inputs and the event.
+      #
+      # When you turn it on, drop `ready_for_review` from `types:` above: once
+      # the draft has been reviewed on every push, that event only buys a second
+      # review of a commit already reviewed.
+      # review_drafts: true
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       # Optional. With it, the reviewer reads the Linear ticket this pull
