@@ -1,0 +1,35 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOnYyOpHOAAEL"
+          },
+          "nodes": [
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/korbyx-app/src/server/analytic-units.ts",
+              "line": 132,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 3002,
+                    "author": {
+                      "login": "claude",
+                      "__typename": "Bot"
+                    },
+                    "body": "🟡 **Nit** — le cinquieme code rend obsolete le commentaire de la ligne 123.",
+                    "createdAt": "2026-09-11T10:26:00Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

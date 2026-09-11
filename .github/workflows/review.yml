@@ -453,6 +453,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+          # The pessimistic answer is on disk before anything can fail to
+          # overwrite it — the same discipline as the verdict and the posted
+          # witness. This step is continue-on-error, so without it a failure
+          # here would leave no file, `post` would take the reviewer's counts at
+          # face value, and a second push would silently retract the first
+          # push's findings. With it, the summary says the read was incomplete.
+          printf '%s' '{"blocking":0,"important":0,"nit":0,"complete":false}' \
+            > "$RUNNER_TEMP/prior-live.json"
           .claude-review-tooling/scripts/post-review.sh \
             --mode pre \
             --repo "$GITHUB_REPOSITORY" \

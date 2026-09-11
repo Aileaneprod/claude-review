@@ -1,0 +1,35 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": true,
+            "endCursor": "Y3Vyc29yOnYyOpHOAAEK"
+          },
+          "nodes": [
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/korbyx-app/src/server/roster.ts",
+              "line": 44,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 3001,
+                    "author": {
+                      "login": "claude",
+                      "__typename": "Bot"
+                    },
+                    "body": "🟠 **Important** — la transaction n'est pas annulee sur erreur.",
+                    "createdAt": "2026-09-11T09:00:00Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
