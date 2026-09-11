@@ -1,0 +1,119 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false
+          },
+          "nodes": [
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/korbyx-app/src/server/analytic-units.ts",
+              "line": 132,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 2001,
+                    "author": {
+                      "login": "claude",
+                      "__typename": "Bot"
+                    },
+                    "body": "🟡 **Nit** — ce cinquieme code rend obsolete le « Ces quatre codes-ci » de la ligne 123.",
+                    "createdAt": "2026-09-11T10:26:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": true,
+              "isOutdated": false,
+              "path": "apps/korbyx-app/src/server/roster.ts",
+              "line": 44,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 2002,
+                    "author": {
+                      "login": "claude",
+                      "__typename": "Bot"
+                    },
+                    "body": "🟠 **Important** — la transaction n'est pas annulee sur erreur.",
+                    "createdAt": "2026-09-11T09:00:00Z"
+                  },
+                  {
+                    "databaseId": 2003,
+                    "author": {
+                      "login": "jdfyras",
+                      "__typename": "User"
+                    },
+                    "body": "**Retenu**, corrige au commit suivant.",
+                    "createdAt": "2026-09-11T09:30:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": true,
+              "path": "docs/kor-360-recette.md",
+              "line": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 2004,
+                    "author": {
+                      "login": "claude",
+                      "__typename": "Bot"
+                    },
+                    "body": "🟡 **Nit** — les deux lignes du tableau se contredisent sur l'existence de ce test.",
+                    "createdAt": "2026-09-11T14:11:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "packages/database/src/schema/isolation.ts",
+              "line": 88,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 2005,
+                    "author": {
+                      "login": "coderabbitai",
+                      "__typename": "Bot"
+                    },
+                    "body": "🔴 **Blocking** — potential race between the membership read and the write.",
+                    "createdAt": "2026-09-11T10:00:00Z"
+                  }
+                ]
+              }
+            },
+            {
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "apps/korbyx-app/src/routes/index.tsx",
+              "line": 12,
+              "comments": {
+                "nodes": [
+                  {
+                    "databaseId": 2006,
+                    "author": {
+                      "login": "claude",
+                      "__typename": "User"
+                    },
+                    "body": "🔴 **Blocking** — un humain qui s'appelle claude, et qui n'est pas nous.",
+                    "createdAt": "2026-09-11T11:00:00Z"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

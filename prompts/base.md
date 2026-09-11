@@ -274,8 +274,9 @@ Example body:
 >     user = db.users.find_one({"_id": ObjectId(user_id), "owner": current_user.id})
 > ```
 
-**Do not** post a finding that already appears in this list from an earlier
-review of this PR — the author has seen it:
+Findings already on this pull request, grouped by what to do with each. **Do
+not post any of them again** — the author has seen them. The headings say which
+are still standing, which the author has settled, and which are not ours:
 
 {{PRIOR_FINDINGS}}
 
@@ -302,6 +303,10 @@ Structure, in this order:
    | 🔴 Blocking | 0 |
    | 🟠 Important | 0 |
    | 🟡 Nit | 0 |
+
+   Count **only what you post in this run**. The workflow adds back the earlier
+   findings still standing on the pull request, so counting them here would
+   double them.
 
 3. **Acceptance criteria** — one line, always, so the author can see whether you
    had anything to check against: `Criteria: N stated · M evidenced · K unmet`,

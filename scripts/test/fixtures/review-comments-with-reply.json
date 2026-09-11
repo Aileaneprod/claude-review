@@ -1,0 +1,24 @@
+[
+  {
+    "id": 5001,
+    "in_reply_to_id": null,
+    "path": "apps/korbyx-app/src/server/analytic-units.ts",
+    "line": 132,
+    "original_line": 132,
+    "user": {
+      "login": "claude[bot]"
+    },
+    "body": "🟡 **Nit** — le cinquieme code rend obsolete le commentaire de la ligne 123."
+  },
+  {
+    "id": 5002,
+    "in_reply_to_id": 5001,
+    "path": "apps/korbyx-app/src/server/analytic-units.ts",
+    "line": 132,
+    "original_line": 132,
+    "user": {
+      "login": "jdfyras"
+    },
+    "body": "Bien vu, on y reviendra dans la PR suivante."
+  }
+]

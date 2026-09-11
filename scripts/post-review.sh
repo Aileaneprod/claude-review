@@ -3,15 +3,28 @@
 # post-review.sh — own the single sticky summary comment on a pull request.
 #
 # Usage:
-#   post-review.sh --mode pre  --repo OWNER/REPO --pr N --out FILE
+#   post-review.sh --mode pre  --repo OWNER/REPO --pr N --out FILE \
+#                  [--live-counts-out FILE]
 #   post-review.sh --mode post --repo OWNER/REPO --pr N \
 #                  [--execution-file FILE] [--body-file FILE] \
-#                  [--posted-out FILE] [--dry-run]
+#                  [--prior-live FILE] [--posted-out FILE] [--dry-run]
 #
-# pre   Read the existing sticky comment's finding ledger plus the inline review
-#       comments already on the PR, and write them as markdown to --out. That
-#       file is fed into the prompt so a re-review after a push does not repost
-#       findings the author has already seen.
+# pre   Read the existing sticky comment's finding ledger plus the review
+#       threads already on the PR, and write them as markdown to --out, grouped
+#       by what the reviewer should do with each. That file is fed into the
+#       prompt so a re-review after a push does not repost findings the author
+#       has already seen.
+#
+#       --live-counts-out writes {"blocking":N,"important":N,"nit":N}: how many
+#       findings OF OURS are still standing — neither resolved nor stranded on
+#       lines that have changed. `post` adds them to the reviewer's own counts,
+#       because the sticky comment is the pull request's standing verdict and
+#       not a log of the last run.
+#
+#       Measured here, before the reviewer runs, and deliberately not in `post`:
+#       claude-code-action writes the execution file some milliseconds before it
+#       flushes the buffered inline comments, so a count taken at post time can
+#       miss the comments the run has just made.
 #
 # post  Recover the summary the reviewer produced, then upsert it as the sticky
 #       comment: PATCH the one carrying the marker if it exists, POST otherwise.
@@ -47,8 +60,10 @@ mode=""
 repo=""
 pr_number=""
 out_file=""
+live_counts_out=""
 execution_file=""
 body_file=""
+prior_live=""
 posted_out=""
 dry_run=0
 
@@ -63,11 +78,13 @@ while [ "$#" -gt 0 ]; do
     --repo)           [ "$#" -ge 2 ] || die "--repo requires a value";           repo="$2";           shift 2 ;;
     --pr)             [ "$#" -ge 2 ] || die "--pr requires a value";             pr_number="$2";      shift 2 ;;
     --out)            [ "$#" -ge 2 ] || die "--out requires a value";            out_file="$2";       shift 2 ;;
+    --live-counts-out) [ "$#" -ge 2 ] || die "--live-counts-out requires a value"; live_counts_out="$2"; shift 2 ;;
+    --prior-live)     [ "$#" -ge 2 ] || die "--prior-live requires a value";     prior_live="$2";     shift 2 ;;
     --execution-file) [ "$#" -ge 2 ] || die "--execution-file requires a value"; execution_file="$2"; shift 2 ;;
     --body-file)      [ "$#" -ge 2 ] || die "--body-file requires a value";      body_file="$2";      shift 2 ;;
     --posted-out)     [ "$#" -ge 2 ] || die "--posted-out requires a value";     posted_out="$2";     shift 2 ;;
     --dry-run)        dry_run=1; shift ;;
-    -h|--help)        sed -n '2,38p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,51p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done
@@ -121,6 +138,45 @@ with open(sys.argv[2], "w", encoding="utf-8") as handle:
 PY
 }
 
+# Review threads carry the two facts REST does not: whether the author resolved
+# the thread, and whether the lines it hangs on still exist in the diff. Without
+# them "already posted" is the only thing we can know about a finding, and a
+# resolved one would go on being counted forever.
+#
+# Only the opening comment of each thread is read. It is the finding; the
+# replies are the conversation about it.
+fetch_threads() {
+  local dest="$1" owner name
+  owner="${repo%%/*}"
+  name="${repo##*/}"
+  # shellcheck disable=SC2016
+  # Single-quoted on purpose: $owner, $name and $pr are GraphQL variables bound
+  # by -F and must reach the server unexpanded.
+  if ! gh api graphql -F owner="$owner" -F name="$name" -F pr="$pr_number" -f query='
+query($owner:String!, $name:String!, $pr:Int!) {
+  repository(owner:$owner, name:$name) {
+    pullRequest(number:$pr) {
+      reviewThreads(first:100) {
+        pageInfo { hasNextPage }
+        nodes {
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first:1) {
+            nodes { author { login __typename } body }
+          }
+        }
+      }
+    }
+  }
+}' >"$dest" 2>"${dest}.err"; then
+    printf 'post-review: warning: could not read the review threads\n' >&2
+    sed 's/^/post-review:   /' "${dest}.err" >&2 || true
+    printf '%s' '{}' >"$dest"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # pre — hand the already-seen findings to the prompt
 # ---------------------------------------------------------------------------
@@ -128,41 +184,119 @@ if [ "$mode" = "pre" ]; then
   [ -n "$out_file" ] || die "--out is required in pre mode"
 
   fetch_json "repos/${repo}/issues/${pr_number}/comments" "${work_dir}/issue.json"
-  fetch_json "repos/${repo}/pulls/${pr_number}/comments" "${work_dir}/review.json"
+  fetch_threads "${work_dir}/threads.json"
 
-  python3 - "${work_dir}/issue.json" "${work_dir}/review.json" "$out_file" \
-            "$MARKER" "$LEDGER_PREFIX" "$LEDGER_SUFFIX" <<'PY'
+  python3 - "${work_dir}/issue.json" "${work_dir}/threads.json" "$out_file" \
+            "$live_counts_out" "$MARKER" "$LEDGER_PREFIX" "$LEDGER_SUFFIX" <<'PY'
 import base64
 import json
 import sys
 
-issue_path, review_path, out_path, marker, led_pre, led_suf = sys.argv[1:7]
+(issue_path, threads_path, out_path, counts_path,
+ marker, led_pre, led_suf) = sys.argv[1:8]
+
+# The logins our reviewer posts under. The GitHub App comments as `claude`; a
+# repository running with use_github_app: false gets the same comments from
+# `github-actions`. GraphQL spells both WITHOUT the `[bot]` suffix that REST
+# appends, so the suffix is stripped rather than matched — a guard written
+# against one spelling and fixtured against the other is dead on arrival, and
+# this repository has already shipped one of those.
+OUR_POSTERS = ("claude", "github-actions")
+
+SEVERITIES = (("🔴", "blocking"), ("🟠", "important"), ("🟡", "nit"))
+
+DECORATION = ("🔴", "🟠", "🟡", "🟣", "**", "Blocking", "Important",
+              "Nit", "Pre-existing", "—", "-", ":")
 
 
-def load(path):
+def load(path, empty):
     try:
         with open(path, encoding="utf-8") as handle:
-            return json.load(handle)
+            value = json.load(handle)
     except (OSError, ValueError):
-        return []
+        return empty
+    return value if isinstance(value, type(empty)) else empty
+
+
+def posted_by_us(author):
+    author = author or {}
+    # A human whose login happens to be `claude` is not the reviewer.
+    if author.get("__typename") != "Bot":
+        return False
+    login = (author.get("login") or "").lower()
+    if login.endswith("[bot]"):
+        login = login[:-len("[bot]")]
+    return login in OUR_POSTERS
 
 
 def first_line(text):
     for line in (text or "").splitlines():
         line = line.strip()
         if line:
-            # Strip the leading severity emoji/label decoration for a stable title.
-            for token in ("🔴", "🟠", "🟡", "🟣", "**", "Blocking", "Important",
-                          "Nit", "Pre-existing", "—", "-", ":"):
+            for token in DECORATION:
                 line = line.replace(token, " ")
             return " ".join(line.split())
     return ""
 
 
-entries = {}
+def severity_of(text):
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        # Only the opening line: a body that quotes another severity further
+        # down must not change what this finding counts as.
+        for emoji, name in SEVERITIES:
+            if emoji in line:
+                return name
+        return None
+    return None
 
-# Findings recorded in the ledger of a previous run.
-for comment in load(issue_path):
+
+def where(path, line):
+    if not path:
+        return "?"
+    return "%s:%s" % (path, line) if line else path
+
+
+ours_live, ours_resolved, ours_outdated, theirs, vanished = [], [], [], [], []
+counts = dict((name, 0) for _, name in SEVERITIES)
+seen = set()
+
+threads = load(threads_path, {})
+container = ((((threads.get("data") or {}).get("repository") or {})
+              .get("pullRequest") or {}).get("reviewThreads") or {})
+
+if (container.get("pageInfo") or {}).get("hasNextPage"):
+    sys.stderr.write("post-review: warning: this pull request has more than 100 "
+                     "review threads; the prior-findings list is incomplete\n")
+
+for thread in container.get("nodes") or []:
+    opener = ((thread.get("comments") or {}).get("nodes") or [None])[0]
+    if not opener:
+        continue
+    title = first_line(opener.get("body"))
+    if not title:
+        continue
+    path, line = thread.get("path"), thread.get("line")
+    seen.add((path, line, title))
+    entry = "- `%s` — %s" % (where(path, line), title)
+    if not posted_by_us(opener.get("author")):
+        theirs.append(entry)
+    elif thread.get("isResolved"):
+        ours_resolved.append(entry)
+    elif thread.get("isOutdated"):
+        ours_outdated.append(entry)
+    else:
+        ours_live.append(entry)
+        severity = severity_of(opener.get("body"))
+        if severity:
+            counts[severity] += 1
+
+# Findings a previous run recorded in the sticky comment's ledger whose thread
+# is no longer on the pull request — deleted, or lost to a force-push. No thread
+# means no way to know whether they still stand, so they are listed to stop a
+# repeat and counted by nobody.
+for comment in load(issue_path, []):
     body = comment.get("body") or ""
     if marker not in body or led_pre not in body:
         continue
@@ -173,29 +307,46 @@ for comment in load(issue_path):
         continue
     for item in payload.get("findings", []):
         key = (item.get("path"), item.get("line"), item.get("title"))
-        entries[key] = item
+        if key in seen:
+            continue
+        seen.add(key)
+        vanished.append("- `%s` — %s" % (where(item.get("path"), item.get("line")),
+                                         item.get("title") or ""))
 
-# Inline comments actually present on the PR right now — the source of truth.
-for comment in load(review_path):
-    path = comment.get("path")
-    line = comment.get("line") or comment.get("original_line")
-    title = first_line(comment.get("body"))
-    if not path or not title:
-        continue
-    entries[(path, line, title)] = {"path": path, "line": line, "title": title}
+SECTIONS = (
+    ("Still standing, and posted by you. The counts table already includes "
+     "these — do not post them again, and do not count them again either",
+     ours_live),
+    ("Posted by you, and since resolved. Do not post again; they are settled",
+     ours_resolved),
+    ("Posted by you, on lines the diff has since changed. Do not repeat as "
+     "written — raise it again only if the new code still has the problem",
+     ours_outdated),
+    ("Posted by the other reviewer or by a human. Do not repeat them; they are "
+     "not yours to count", theirs),
+    ("Recorded by an earlier run, with no comment left on the pull request. Do "
+     "not repeat them", vanished),
+)
 
-lines = []
-for item in sorted(entries.values(), key=lambda i: (i.get("path") or "",
-                                                    i.get("line") or 0)):
-    where = item.get("path") or "?"
-    if item.get("line"):
-        where = "%s:%s" % (where, item["line"])
-    lines.append("- `%s` — %s" % (where, item.get("title") or ""))
+blocks = []
+for heading, items in SECTIONS:
+    if items:
+        blocks.append("**%s:**\n\n%s" % (heading, "\n".join(sorted(items))))
+text = "\n\n".join(blocks)
 
 with open(out_path, "w", encoding="utf-8", newline="\n") as handle:
-    handle.write("\n".join(lines) + ("\n" if lines else ""))
+    handle.write(text + ("\n" if text else ""))
 
-sys.stderr.write("post-review: %d prior finding(s) loaded\n" % len(lines))
+if counts_path:
+    with open(counts_path, "w", encoding="utf-8", newline="\n") as handle:
+        json.dump(counts, handle, indent=1, sort_keys=True)
+        handle.write("\n")
+
+sys.stderr.write(
+    "post-review: %d prior finding(s) loaded; %d still standing and ours "
+    "(%d blocking, %d important, %d nit)\n"
+    % (len(seen), len(ours_live), counts["blocking"], counts["important"],
+       counts["nit"]))
 PY
   exit 0
 fi
@@ -251,14 +402,16 @@ fetch_json "repos/${repo}/pulls/${pr_number}/comments" "${work_dir}/review.json"
 # comment id (or "new") on stdout so the shell knows which call to make.
 python3 - "$summary_file" "${work_dir}/issue.json" "${work_dir}/review.json" \
           "${work_dir}/body.md" "${work_dir}/plan.json" \
-          "$MARKER" "$LEDGER_PREFIX" "$LEDGER_SUFFIX" <<'PY'
+          "$MARKER" "$LEDGER_PREFIX" "$LEDGER_SUFFIX" "$prior_live" <<'PY'
 import base64
 import hashlib
 import json
+import os
+import re
 import sys
 
 (summary_path, issue_path, review_path, body_path, plan_path,
- marker, led_pre, led_suf) = sys.argv[1:9]
+ marker, led_pre, led_suf, prior_live_path) = sys.argv[1:10]
 
 
 def load(path):
@@ -282,6 +435,69 @@ def first_line(text):
 
 with open(summary_path, encoding="utf-8") as handle:
     summary = handle.read().strip()
+
+
+# The reviewer counts what IT found on this run — base.md tells it not to repost
+# what an earlier run already raised, and it does not tally those either. But
+# this comment is edited in place, so the count it carries is the pull request's
+# standing verdict, not a log of the last push. Left alone, a 🟡 raised on push
+# one is announced by a summary that push two overwrites with `🟡 0`, and the
+# finding goes to merge with nothing on the pull request saying it exists
+# (Aileaneprod/korbyx#162, #163, #164 — all three on 2026-09-11).
+#
+# So the still-standing findings measured in `pre` are added back here. `pre`
+# runs before the reviewer, so its numbers cannot include anything this run
+# posted, and nothing is counted twice.
+COUNT_ROW = re.compile(r"^(\s*\|[^|]*\|\s*)(\d+)(\s*\|.*)$")
+PRIOR_SEVERITIES = (("🔴", "blocking"), ("🟠", "important"), ("🟡", "nit"))
+
+prior_live = {}
+if prior_live_path and os.path.isfile(prior_live_path):
+    try:
+        with open(prior_live_path, encoding="utf-8") as handle:
+            loaded = json.load(handle)
+        if isinstance(loaded, dict):
+            prior_live = loaded
+    except (OSError, ValueError) as exc:
+        sys.stderr.write("post-review: could not read the standing counts: %s\n" % exc)
+
+
+def carried(key):
+    try:
+        return max(0, int(prior_live.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def with_standing(text):
+    """Add the still-standing earlier findings to the counts table of `text`.
+
+    Applied once, at the very end, to whichever text becomes the summary. The
+    recovered text and the adopted fallback are two different strings arriving
+    at two different points, and adjusting only the first leaves a crashed run —
+    the case the fallback exists for — publishing the wrong verdict.
+    """
+    if not text or not any(carried(key) for _, key in PRIOR_SEVERITIES):
+        return text
+    rewritten = []
+    added = dict((key, 0) for _, key in PRIOR_SEVERITIES)
+    for line in text.splitlines():
+        for emoji, key in PRIOR_SEVERITIES:
+            extra = carried(key)
+            if not extra or emoji not in line:
+                continue
+            match = COUNT_ROW.match(line)
+            if match:
+                line = "%s%d%s" % (match.group(1), int(match.group(2)) + extra,
+                                   match.group(3))
+                added[key] += extra
+            break
+        rewritten.append(line)
+    sys.stderr.write(
+        "post-review: carried %d blocking, %d important, %d nit still standing "
+        "from earlier runs into the counts table\n"
+        % (added["blocking"], added["important"], added["nit"]))
+    return "\n".join(rewritten)
 
 issue_comments = load(issue_path)
 review_comments = load(review_path)
@@ -354,9 +570,20 @@ if led_pre in summary:
     _, _, tail = rest.partition(led_suf)
     summary = (head + tail).strip()
 
+# Last, so it reaches the recovered text and the adopted fallback alike.
+summary = with_standing(summary)
+
 findings = []
 seen = set()
 for comment in review_comments:
+    # A reply is the conversation about a finding, not a finding. REST returns
+    # every review comment flat, and on a busy pull request the replies are the
+    # majority — 18 of the 28 on Aileaneprod/korbyx#164. Recording them as
+    # findings made the ledger mostly noise, and `pre` now reports anything in
+    # the ledger with no thread behind it as a finding whose comment has gone,
+    # which for a reply is simply untrue.
+    if comment.get("in_reply_to_id") is not None:
+        continue
     path = comment.get("path")
     line = comment.get("line") or comment.get("original_line")
     title = first_line(comment.get("body"))

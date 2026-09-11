@@ -457,7 +457,8 @@ jobs:
             --mode pre \
             --repo "$GITHUB_REPOSITORY" \
             --pr "$PR_NUMBER" \
-            --out "$RUNNER_TEMP/prior-findings.md"
+            --out "$RUNNER_TEMP/prior-findings.md" \
+            --live-counts-out "$RUNNER_TEMP/prior-live.json"
 
       - name: Build the review prompt
         id: prompt
@@ -637,6 +638,15 @@ jobs:
                 --posted-out "$RUNNER_TEMP/posted")
           if [ -n "${EXECUTION_FILE:-}" ] && [ -f "$EXECUTION_FILE" ]; then
             args+=(--execution-file "$EXECUTION_FILE")
+          fi
+          # How many findings of ours were already standing on this pull request
+          # when the run began, measured before the reviewer touched anything.
+          # The reviewer counts only what it raises now, so without this the
+          # summary of a second push reports zero and quietly retracts the first
+          # push's findings. The step that writes this file is
+          # continue-on-error; absent, the reviewer's own counts stand.
+          if [ -f "$RUNNER_TEMP/prior-live.json" ]; then
+            args+=(--prior-live "$RUNNER_TEMP/prior-live.json")
           fi
           .claude-review-tooling/scripts/post-review.sh "${args[@]}"
           echo "posted=$(cat "$RUNNER_TEMP/posted")" >> "$GITHUB_OUTPUT"
