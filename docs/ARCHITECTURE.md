@@ -133,13 +133,31 @@ contributions.
 
 `post-review.sh` owns the summary comment. It runs twice:
 
-- **before** the review, reading the ledger of already-posted findings out of
-  the existing comment and feeding them into the prompt, so a re-review after a
-  push does not repeat what the author already read;
+- **before** the review, reading the review threads and the ledger of
+  already-posted findings out of the existing comment, and feeding them into the
+  prompt grouped by what to do with each, so a re-review after a push does not
+  repeat what the author already read;
 - **after**, recovering the summary and upserting it — PATCH the comment
   carrying `<!-- claude-review:summary -->`, POST if there is none.
 
 N pushes produce one summary, edited in place, not N summaries.
+
+Because it is edited in place, that one summary is the pull request's **standing
+verdict**, not a log of the last push — so its counts have to cover findings
+raised by earlier runs that nobody has settled. The reviewer cannot supply them:
+it is told not to repost what it already raised, and it does not tally those
+either. So the `pre` run measures them — a finding of ours whose thread is
+neither resolved nor outdated — and `post` adds them back.
+
+That measurement belongs to `pre` and not to `post`, because `pre` runs before
+the reviewer. `claude-code-action` writes the execution file some milliseconds
+before it flushes its buffered inline comments, so the same count taken at post
+time can miss the very comments the run has just made.
+
+Without it, a 🟡 raised on the first push was announced by a summary the second
+push overwrote with `🟡 0`, and the finding went to merge with nothing on the
+pull request saying it existed — Aileaneprod/korbyx#162, #163 and #164, all
+three on 2026-09-11, one of them merged in that state.
 
 The summary text comes from the action's `execution_file`, a single
 pretty-printed JSON array of SDK messages written even when the run crashes. If
