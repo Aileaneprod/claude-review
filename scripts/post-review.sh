@@ -145,11 +145,7 @@ PY
 #
 # Only the opening comment of each thread is read. It is the finding; the
 # replies are the conversation about it.
-# Ten pages of a hundred. The busiest pull request this has run against carried
-# 28 review comments, so this is a bound and not a live constraint — but an
-# unbounded loop against a paginated API is not something to leave to chance.
-THREAD_PAGE_LIMIT=10
-
+#
 # shellcheck disable=SC2016
 # Single-quoted on purpose: $owner, $name, $pr and $after are GraphQL variables
 # bound by the flags below and must reach the server unexpanded.
@@ -172,6 +168,11 @@ query($owner:String!, $name:String!, $pr:Int!, $after:String) {
     }
   }
 }'
+
+# Ten pages of a hundred. The busiest pull request this has run against carried
+# 28 review comments, so this is a bound and not a live constraint — but an
+# unbounded loop against a paginated API is not something to leave to chance.
+THREAD_PAGE_LIMIT=10
 
 fetch_threads() {
   local dest="$1" owner name cursor="" page=0 complete=true dir
