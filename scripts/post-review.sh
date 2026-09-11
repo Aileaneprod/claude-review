@@ -292,10 +292,12 @@ for thread in container.get("nodes") or []:
         if severity:
             counts[severity] += 1
 
-# Findings a previous run recorded in the sticky comment's ledger whose thread
-# is no longer on the pull request — deleted, or lost to a force-push. No thread
-# means no way to know whether they still stand, so they are listed to stop a
-# repeat and counted by nobody.
+# Findings a previous run recorded in the sticky comment's ledger that no thread
+# above accounts for — deleted, lost to a force-push, or simply unread because
+# the GraphQL call failed. Either way there is no way to know whether they still
+# stand, so they are listed to stop a repeat and counted by nobody. The heading
+# says "not among the current threads" and not "the comment is gone", because on
+# a failed read the second would be a lie.
 for comment in load(issue_path, []):
     body = comment.get("body") or ""
     if marker not in body or led_pre not in body:
@@ -324,8 +326,8 @@ SECTIONS = (
      ours_outdated),
     ("Posted by the other reviewer or by a human. Do not repeat them; they are "
      "not yours to count", theirs),
-    ("Recorded by an earlier run, with no comment left on the pull request. Do "
-     "not repeat them", vanished),
+    ("Recorded by an earlier run and not among the pull request's current "
+     "threads. Do not repeat them", vanished),
 )
 
 blocks = []

@@ -170,6 +170,13 @@ _setup
 _prior '{"blocking": 0, "important": 0, "nit": 1}'
 assert_contains "🟠 Important | 1" "the reviewer's own count is not disturbed" -- _body summary-french.json
 
+it "adds to a severity the reviewer also counted, rather than replacing it"
+# The only case where the arithmetic can be told from an overwrite: this run
+# raised one 🟠 and one of ours from an earlier push is still standing.
+_setup
+_prior '{"blocking": 0, "important": 1, "nit": 0}'
+assert_contains "🟠 Important | 2" "one from this run plus one still standing" -- _body summary-french.json
+
 it "keeps a zero at zero when nothing earlier is still live"
 _setup
 _prior '{"blocking": 0, "important": 0, "nit": 0}'
