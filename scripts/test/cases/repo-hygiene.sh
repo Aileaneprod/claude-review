@@ -79,3 +79,40 @@ _help_windows() {
   done
 }
 assert_equal "" "$(_help_windows)" "no --help window truncates its header or spills into code"
+
+# --- the draft guard lives in two jobs, and they have to agree ---------------
+#
+# `review` skips a draft and `fork-notice` explains the skip on one, so both
+# carry the same condition. `review_drafts` turns it off — in both, or the
+# repository gets an input that works in half its cases. Editing one `if:` and
+# forgetting the other is the entire failure mode, and no test would have
+# noticed: each job on its own still parses and still runs.
+#
+# PyYAML is not assumed. ci.yml treats it as optional and this directory's rule
+# is bash and stock python3, nothing to install.
+
+it "lets no job skip a draft without honouring review_drafts"
+_draft_guards() {
+  python3 - "$SCRIPTS/../.github/workflows/review.yml" <<'PY'
+import io
+import re
+import sys
+
+text = io.open(sys.argv[1], encoding="utf-8").read()
+_, _, jobs = text.partition("\njobs:\n")
+
+offenders = []
+for name, body in re.findall(r"^  ([A-Za-z0-9_-]+):\n(.*?)(?=^  [A-Za-z0-9_-]+:\n|\Z)",
+                             jobs, re.M | re.S):
+    match = re.search(r"^    if: >-\n((?:^      .*\n)+)", body, re.M)
+    if not match:
+        continue
+    condition = match.group(1)
+    if ("pull_request.draft" in condition
+            and "inputs.review_drafts" not in condition):
+        offenders.append(name)
+
+print(" ".join(offenders))
+PY
+}
+assert_equal "" "$(_draft_guards)" "every job that skips a draft can be told not to"

@@ -51,6 +51,12 @@ it "keeps every config-mirroring input defaulting to empty in review.yml"
 # config/defaults.yml is dead for that key and docs/TUNING.md is lying.
 # tooling_ref, tooling_repo and use_github_app are exempt: they configure the
 # workflow itself, not the review, and have no entry in config/defaults.yml.
+#
+# review_drafts is exempt for a stronger reason than the other three: it CANNOT
+# have an entry there. It gates a job-level `if:`, which GitHub evaluates before
+# anything is checked out, so `.claude-review.yml` has not been read and cannot
+# be. A default here is therefore not shadowing config — it is the only place
+# the value can come from apart from the caller's `with:`.
 _defaults_report() {
   python3 -c "
 import sys, yaml
@@ -59,7 +65,7 @@ doc = yaml.safe_load(open(sys.argv[1], encoding='utf-8'))
 # workflow trigger block is doc[True], not doc['on'].
 trigger = doc.get('on', doc.get(True))
 inputs = trigger['workflow_call']['inputs']
-exempt = {'tooling_ref', 'tooling_repo', 'use_github_app'}
+exempt = {'tooling_ref', 'tooling_repo', 'use_github_app', 'review_drafts'}
 bad = [n for n, spec in inputs.items()
        if n not in exempt and str(spec.get('default', '')) not in ('', 'None')]
 print(' '.join(sorted(bad)) if bad else 'none')

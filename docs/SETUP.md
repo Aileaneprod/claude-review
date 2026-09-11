@@ -551,3 +551,12 @@ draft, the author is a bot (Dependabot/Renovate/etc.), the `skip-ai-review`
 label is present, every changed file is excluded by config, or the PR is from
 a fork. All but the fork case are silent. The fork case always posts an
 explanation, or at minimum writes one to the Actions job summary.
+
+The draft case is the one you can turn off, with `review_drafts: true` in the
+wrapper's `with:`. It has to go in the wrapper and not in the repository's
+`.claude-review.yml`, because the guard is a job-level `if:` evaluated before
+anything is checked out — the only things it can read are the caller's inputs
+and the event. Expect roughly to double the number of runs: drafts churn, and
+on korbyx one branch pushed nine times before it was marked ready. Pair it with
+dropping `ready_for_review` from the wrapper's `types:`, which once drafts are
+reviewed only fires a second review of a commit already reviewed.

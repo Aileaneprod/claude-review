@@ -39,7 +39,8 @@ without being told about it. Seven guards run *before* any model call — the
 scarce resource is subscription quota, so a review that can't produce value must
 never start. Superseded runs are cancelled, drafts/bots/labelled and fork PRs are
 skipped, an empty diff exits early, and an oversized diff degrades to triage mode
-over the highest-risk files instead of burning the whole budget.
+over the highest-risk files instead of burning the whole budget. The draft skip
+is the one a repository can switch off, with `review_drafts: true`.
 
 The reviewer is granted read and comment tools only — no `Edit`, no `Write`, no
 unrestricted `Bash`. It cannot modify code.

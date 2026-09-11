@@ -53,7 +53,7 @@ Seven guards, cheapest first:
 | # | Guard | Where | Cost when it fires |
 |---|---|---|---|
 | 0 | Cancel superseded runs | workflow `concurrency` | in-flight run killed |
-| 1 | Skip drafts | job `if:` | job never starts |
+| 1 | Skip drafts (unless `review_drafts`) | job `if:` | job never starts |
 | 2 | Skip bot authors | job `if:` | job never starts |
 | 3 | Skip `skip-ai-review` label | job `if:` | job never starts |
 | 4 | Skip forks | job `if:` + `fork-notice` job | ~5s |

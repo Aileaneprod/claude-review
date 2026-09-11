@@ -71,6 +71,20 @@ on:
           would mean config/defaults.yml is never read for this key.
         type: string
         default: ""
+      review_drafts:
+        description: >-
+          Review draft pull requests too. Off by default: a draft is not asking
+          for review yet, and drafts churn — one branch pushed nine times before
+          it was marked ready. Turn it on where feedback while the work is in
+          progress is worth that, and where the other reviewer on the repository
+          is already doing it: a draft nobody reviews is symmetric, a draft only
+          one reviewer reads is not.
+
+          This cannot live in the reviewed repository's `.claude-review.yml`.
+          The guard is a job-level `if:`, evaluated before any checkout, so the
+          only things it can read are the caller's inputs and the event.
+        type: boolean
+        default: false
       tooling_ref:
         description: >-
           Git ref of claude-review to load scripts and prompts from. Must match
@@ -128,7 +142,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # The review itself.
   #
-  # GUARD 1 — skip drafts.        A draft is not asking for review yet.
+  # GUARD 1 — skip drafts.        A draft is not asking for review yet, unless
+  #                               the caller passes review_drafts: true.
   # GUARD 2 — skip bot authors.   Dependabot/Renovate PRs are machine-generated.
   # GUARD 3 — skip the opt-out label.
   # GUARD 4 — skip forks (see the fork-notice job below for the rationale).
@@ -140,7 +155,7 @@ jobs:
     name: AI review
     runs-on: ubuntu-latest
     if: >-
-      github.event.pull_request.draft == false
+      (inputs.review_drafts || github.event.pull_request.draft == false)
       && github.event.pull_request.user.type != 'Bot'
       && !endsWith(github.event.pull_request.user.login, '[bot]')
       && github.event.pull_request.user.login != 'dependabot'
@@ -840,7 +855,7 @@ jobs:
     name: AI review skipped (fork)
     runs-on: ubuntu-latest
     if: >-
-      github.event.pull_request.draft == false
+      (inputs.review_drafts || github.event.pull_request.draft == false)
       && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
       && github.event.pull_request.head.repo.full_name != github.repository
     permissions:
