@@ -538,6 +538,7 @@ config/defaults.yml  <  workflow inputs  <  that repo's own .claude-review.yml
 | Review job doesn't run at all | The PR is a draft, its author is a bot, it has the `skip-ai-review` label, or it's from a fork | Expected behavior — see "When nothing happens" below |
 | Comment says "AI review skipped — pull request from a fork" | Expected — forks never get secrets, by GitHub design, so it can't authenticate. Review it manually. |
 | Comment says "AI review unavailable" / step fails immediately | `CLAUDE_CODE_OAUTH_TOKEN` missing on that repo, or the token expired (they last a year) | Redo step 2 (mint a new one) and step 3 (re-set the secret on that repo) |
+| Several PRs go "AI review unavailable" within the same few hours, across repos | The subscription behind the token has hit its **usage limit**. The job summary says `api_error_status 429`, `terminal_reason api_error` — a 401 by contrast means the token itself | Wait for the limit to reset (or use a token on another subscription), then catch up the PRs it skipped: see "Catching up after an outage" below |
 | Runs, finishes, but posts nothing at all | Check the Actions run's **Summary** tab first — it usually explains why (e.g. every changed file was excluded, or the App isn't installed) | Reread the job summary; if genuinely blank, that can also just mean the PR had nothing to flag |
 | Review didn't happen, but the check is green and no grey `AI review outcome` check appeared | That repo's wrapper doesn't grant `checks: write` | Add `checks: write` to the `permissions:` block of its `.github/workflows/ai-review.yml`; the run's Summary tab says so too |
 | Reviewer runs but can't post comments | `permissions:` block missing from that repo's wrapper file | Compare against [`templates/wrapper.yml`](../templates/wrapper.yml) and fix |
@@ -560,3 +561,32 @@ and the event. Expect roughly to double the number of runs: drafts churn, and
 on korbyx one branch pushed nine times before it was marked ready. Pair it with
 dropping `ready_for_review` from the wrapper's `types:`, which once drafts are
 reviewed only fires a second review of a commit already reviewed.
+
+### Catching up after an outage
+
+A push the reviewer could not review is not retried. The wrapper listens to
+`pull_request` events only, so the review comes back on the *next* push — and a
+branch whose work is finished never pushes again. After a quota outage, a token
+expiry or a GitHub incident, the pull requests that were open at the time stay
+unreviewed, and the run that skipped them is still green: the reviewer step is
+`continue-on-error` so that a broken reviewer can never block a merge.
+
+What marks those pushes is the grey `AI review outcome` check. To find them and
+replay them:
+
+```bash
+./scripts/rereview-open-prs.sh --repo OWNER/REPO            # list them
+./scripts/rereview-open-prs.sh --repo OWNER/REPO --rerun    # replay them
+```
+
+It reports by default because each line costs a full review's worth of quota.
+`--rerun` replays each pull request's original workflow run against the same
+commit — no empty commit on someone else's branch, no close-and-reopen mailing
+everyone watching — and the replay picks up `claude-review@v1` as it stands now.
+A pull request that already carries a review is never replayed, and neither is
+one whose run is still in flight.
+
+One limit worth knowing: a repository whose wrapper lacks `checks: write`
+publishes no `AI review outcome` check at all, so its misses leave no trace to
+find. The script reads the wrapper first and says so rather than reporting a
+reassuring zero.
