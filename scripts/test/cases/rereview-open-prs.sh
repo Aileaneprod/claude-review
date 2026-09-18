@@ -78,6 +78,7 @@ _setup() {
         cat "$GH_FIX/checks-${sha}.json" ;;
       *actions/runs\?head_sha=*)
         sha="$(printf '%s' "$*" | sed -n 's|.*head_sha=\([0-9a-f]*\).*|\1|p')"
+        [ "${GH_BREAK:-}" = "refuse-runs-$sha" ] && return 1
         cat "$GH_FIX/runs-${sha}.json" ;;
       *"run rerun"*)
         return 0 ;;
@@ -178,8 +179,30 @@ _setup_one() {
 it "never calls it a clean sweep when a check run could not be read"
 _setup_one checks "refuse-$_A"
 assert_not_contains "carries a review" "no clean bill of health on a failed read" -- _report
-assert_contains "could not be inspected" "says how many it could not look at" -- _report
+assert_contains "could not be fully inspected" "says how many it could not look at" -- _report
 assert_status 1 "and carries that in the exit status, for a caller reading no output" -- \
+  "$SCRIPTS/rereview-open-prs.sh" --repo o/r
+
+# The run lookup is the third read on this path, and it was the one left out:
+# it warned, moved on, and let the status stay 0 while the two identical
+# branches above exited 1. "None of them replayable" is then a claim about a
+# read that failed. Our own reviewer caught this on #16 after the first two
+# were fixed — the same defect, one branch further down.
+it "counts a pull request whose workflow runs could not be listed"
+_setup_one checks "refuse-runs-$_A"
+assert_contains "could not list its workflow runs" "says what it could not read" -- _report
+assert_contains "could not be fully inspected" "counts it against the answer" -- _report
+assert_status 1 "and exits 1, like the two reads before it" -- \
+  "$SCRIPTS/rereview-open-prs.sh" --repo o/r
+
+it "keeps 'no run here' apart from 'I could not read the runs'"
+_setup_one
+printf 'not json at all\n' > "$GH_FIX/runs-$_A.json"
+assert_contains "came back unreadable" "an unparseable body is not an absent run" -- _report
+# The honest empty answer stays exit 0: nothing failed, there is simply no run.
+_setup_one
+printf '{"workflow_runs":[]}\n' > "$GH_FIX/runs-$_A.json"
+assert_status 0 "a genuine absence of runs is a complete answer" -- \
   "$SCRIPTS/rereview-open-prs.sh" --repo o/r
 
 it "never calls it a clean sweep when the check runs came back unreadable"

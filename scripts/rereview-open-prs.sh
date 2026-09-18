@@ -204,8 +204,16 @@ PY
   # A check run is created through the API and carries no link back to the
   # workflow run that asked for it, so the run is found the other way round:
   # the runs on this commit, filtered to the wrapper's own path.
+  # A failure here counts like the two above it. This branch used to warn and
+  # move on with the count untouched, on the reasoning that the pull request
+  # had been inspected — it is known unreviewed, and only its run was missing.
+  # But what the caller is told, "none of them replayable", is then a claim
+  # built on a read that failed, and the status stayed 0 while the two
+  # identical branches above exited 1. One more way to say a thing is fine when
+  # it was never looked at.
   if ! gh api "repos/${repo}/actions/runs?head_sha=${sha}&per_page=100" \
        > "${work_dir}/runs.json" 2>/dev/null; then
+    unknown=$((unknown + 1))
     printf '  PR %-5s %s — could not list its workflow runs\n' "$number" "$ref" >&2
     continue
   fi
@@ -214,11 +222,14 @@ PY
 import json
 import sys
 
+# Exit 1, so that "I could not read this" stays distinguishable from "there is
+# genuinely no run here" — which is a real answer, reached by looking, and the
+# one case on this path that deserves to leave the status at 0.
 try:
     with open(sys.argv[1], encoding="utf-8") as handle:
         payload = json.load(handle)
 except (OSError, ValueError):
-    raise SystemExit(0)
+    raise SystemExit(1)
 
 runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
 latest = None
@@ -231,7 +242,11 @@ if latest:
     print("%s\t%s\t%s" % (latest.get("id"), latest.get("run_attempt") or 1,
                           latest.get("status") or "?"))
 PY
-)"
+)" || {
+    unknown=$((unknown + 1))
+    printf '  PR %-5s %s — its workflow runs came back unreadable\n' "$number" "$ref" >&2
+    continue
+  }
 
   if [ -z "$run_line" ]; then
     printf '  PR %-5s %s — unreviewed, but no %s run on %s to replay\n' \
@@ -266,7 +281,7 @@ count="$(printf '%s' "$targets" | grep -c . || true)"
 # on incomplete information — it is the sentence a maintainer acts on by doing
 # nothing.
 if [ "$unknown" -gt 0 ]; then
-  printf 'rereview-open-prs: %s open pull request(s) could not be inspected. What follows is incomplete.\n' \
+  printf 'rereview-open-prs: %s open pull request(s) could not be fully inspected. What follows is incomplete.\n' \
     "$unknown" >&2
 fi
 
