@@ -254,8 +254,8 @@ assert_contains '"blocking": 0' "neither decoy is counted as ours" -- _pre_count
 
 # --- the ledger records findings, and a reply is not one ---------------------
 
-_ledger() {
-  _body_bare "$1" | python3 -c '
+_decode_ledger() {
+  python3 -c '
 import base64, json, re, sys
 body = sys.stdin.read()
 match = re.search(r"claude-review:ledger ([A-Za-z0-9+/=]+)", body)
@@ -263,9 +263,11 @@ if not match:
     print("(no ledger block)")
 else:
     payload = json.loads(base64.b64decode(match.group(1)).decode("utf-8"))
-    print(json.dumps(payload, ensure_ascii=False))
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 '
 }
+
+_ledger() { _body_bare "$1" | _decode_ledger; }
 
 it "keeps a reply out of the finding ledger it embeds"
 # REST returns every review comment flat, replies included, and on a busy pull
@@ -327,3 +329,191 @@ it "still lists every prior finding whoever posted it, so none gets reposted"
 # CodeRabbit's finding either, even though it is not ours to tally.
 _setup "[]" threads-prior-mixed.json
 assert_contains "isolation.ts:88" "their finding stays in the do-not-repost list" -- _pre
+
+# --- the instruction we give ourselves, written down ------------------------
+#
+# That last section is an instruction not to raise what the other reviewer
+# raised first. report.sh publishes one exit criterion — author-confirmed
+# blocking findings THEY raised and we did not — so the number was partly
+# measuring our own instruction, and it improves on its own as they get faster
+# at posting.
+#
+# Measured on the korbyx ledger (read-only, 231 harvested pull requests): 26
+# carried a finding of theirs before our first sticky summary — 55 findings, 16
+# blocking, 9 of those author-confirmed. On the 120 where both reviewers spoke,
+# 330 of their findings and 53 of their blocking ones sat on the pull request
+# while some re-review of ours was being told to leave them alone. korbyx#155,
+# #19 and #166 are the three already known by name.
+#
+# The suppression stays — two threads saying the same thing is a real cost to
+# the author, on every pull request — and is recorded instead.
+
+_suppressed() {
+  "$SCRIPTS/post-review.sh" --mode pre --repo o/r --pr 1 \
+    --out "$TESTTMP/prior.md" --live-counts-out "$TESTTMP/prior-live.json" \
+    >/dev/null 2>&1
+  python3 - "$TESTTMP/prior-live.json" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        doc = json.load(handle)
+except (OSError, ValueError):
+    print("(no counts written)")
+    raise SystemExit
+items = doc.get("suppressed")
+if items is None:
+    print("(nothing recorded)")
+else:
+    print("; ".join(sorted("%s by %s (%s)" % (i.get("path"), i.get("by"),
+                                              i.get("severity"))
+                           for i in items)) or "(none)")
+PY
+}
+
+it "records every finding it tells the reviewer not to file, and only those"
+# Both decoys belong here and our own three do not: the block suppresses a
+# human's thread as well as the other reviewer's, which is why the record keeps
+# who posted it — a human is not the reviewer we are being measured against.
+_setup "[]" threads-prior-mixed.json
+assert_equal \
+  "apps/korbyx-app/src/routes/index.tsx by claude (blocking); packages/database/src/schema/isolation.ts by coderabbitai (blocking)" \
+  "$(_suppressed)" "the suppressed findings are named, with their author and severity"
+
+it "says it suppressed nothing, rather than saying nothing"
+# An absent list and an empty one are different facts — "this run told the
+# reviewer to leave nothing alone" against "this run predates the record" — and
+# a page that cannot tell them apart will read every old pull request as clean.
+_setup
+assert_equal "(none)" "$(_suppressed)" "an empty pull request records an empty list"
+
+_suppressed_key() {
+  "$SCRIPTS/post-review.sh" --mode pre --repo o/r --pr 1 \
+    --out "$TESTTMP/prior.md" --live-counts-out "$TESTTMP/prior-live.json" \
+    >/dev/null 2>&1
+  python3 - "$TESTTMP/prior-live.json" "$1" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        doc = json.load(handle)
+except (OSError, ValueError):
+    doc = {}
+for item in doc.get("suppressed") or []:
+    if item.get("path") == sys.argv[2]:
+        print(item.get("key"))
+        break
+else:
+    print("(nothing recorded)")
+PY
+}
+
+_harvest_key() {
+  rm -rf "$TESTTMP/harvest"
+  printf '[]' > "$TESTTMP/rest-empty.json"
+  "$SCRIPTS/harvest-feedback.sh" --repo o/r --pr 1 \
+    --threads-file "$FIXTURES/threads-prior-mixed.json" \
+    --rest-file "$TESTTMP/rest-empty.json" --out "$TESTTMP/harvest" >/dev/null 2>&1
+  python3 - "$TESTTMP/harvest/o/r/1.json" "$1" <<'PY'
+import hashlib, json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        doc = json.load(handle)
+except (OSError, ValueError):
+    doc = {}
+for finding in doc.get("findings") or []:
+    if finding.get("path") == sys.argv[2]:
+        print(hashlib.sha256(
+            (finding.get("finding") or "").encode("utf-8")).hexdigest()[:8])
+        break
+else:
+    print("(not harvested)")
+PY
+}
+
+it "keys a suppressed finding the way the ledger keys that same finding"
+# The record is worth nothing unless it JOINS. harvest-feedback.sh identifies a
+# finding by (path, sha256 of the thread's opening comment)[:8] — it says why on
+# finding_key, and classify-verdicts.sh puts the same digest in its `key` — so
+# this is the one identifier both sides already speak. What can drift is not the
+# formula but the text fed to it: one side taking the first line, the other the
+# whole body. So the two are compared by running BOTH against the same threads
+# response, not by restating the formula.
+_setup "[]" threads-prior-mixed.json
+assert_equal "$(_harvest_key packages/database/src/schema/isolation.ts)" \
+             "$(_suppressed_key packages/database/src/schema/isolation.ts)" \
+             "the suppression record and the ledger name the same finding"
+
+_pre_then_post_ledger() { _pre_then_post "$1" | _decode_ledger; }
+
+it "carries the record into the sticky comment, where the harvest can reach it"
+# The counts file lives for one job. The sticky comment is on the pull request
+# for good, and harvest-feedback.sh already reads this very body to answer "were
+# we here at all" — so this is the one place the record reaches the ledger
+# without a new API call.
+_setup "[]" threads-prior-mixed.json
+assert_contains '"path": "packages/database/src/schema/isolation.ts"' \
+  "the suppressed finding is in the published ledger" -- _pre_then_post_ledger summary-french.json
+
+it "keeps a record an earlier run made when this run suppressed nothing"
+# The sticky is rewritten from scratch on every push, and a later run legitimately
+# sees less: the thread read is allowed to come back incomplete, and the `pre`
+# step is continue-on-error. korbyx#155 is the case that matters — the only
+# delivered review of the commit in question is the one whose suppression list
+# held the finding, every later run having been cancelled. A snapshot would drop
+# exactly that evidence.
+_setup "$(cat "$FIXTURES/issue-comments-ledger-suppressed.json")"
+assert_contains '"key": "1f04a429"' "the earlier record survives a quieter run" \
+  -- _pre_then_post_ledger summary-french.json
+
+# _concurred PATH FIXTURE — what the published ledger says about that one
+# finding. Asked of the entry by path, not of the ledger as a whole: a
+# substring search for `"concurred": false` matches the OTHER suppressed entry
+# whatever this one says, and a test that cannot tell them apart passed
+# unchanged when the guard below was removed.
+_concurred() {
+  _pre_then_post "$2" | python3 -c '
+import base64, json, re, sys
+body = sys.stdin.read()
+match = re.search(r"claude-review:ledger ([A-Za-z0-9+/=]+)", body)
+if not match:
+    print("(no ledger block)")
+    raise SystemExit
+payload = json.loads(base64.b64decode(match.group(1)).decode("utf-8"))
+for item in payload.get("suppressed") or []:
+    if item.get("path") == sys.argv[1]:
+        print("agreed" if item.get("concurred") else "silent")
+        break
+else:
+    print("(nothing recorded)")
+' "$1"
+}
+
+it "records that the summary called one of those findings blocking anyway"
+# The inline comment is still not posted, so the author reads one thread and not
+# two. What the reviewer may not do is stay silent when it has checked the
+# problem itself and believes it blocking: it says so in the summary, on a line
+# carrying 🔴 and the path, and that is what separates "we would have caught it"
+# from "we were told not to raise it". The form is emoji and path because korbyx
+# runs with `language: français`; an English phrase could never match there, and
+# this repository has already shipped one guard that made that mistake.
+_setup "[]" threads-prior-mixed.json
+assert_equal "agreed" \
+  "$(_concurred packages/database/src/schema/isolation.ts summary-concurs.json)" \
+  "the agreement is recorded against that finding"
+
+it "does not claim agreement on a file where we filed a finding of our own"
+# Same summary, but this time one of OUR inline comments sits in that file too,
+# so the 🔴 line is at least as likely to be about ours. An agreement credited by
+# accident flatters the one number this record exists to keep honest, so the
+# ambiguous case records nothing and the miss stays a miss.
+_setup "[]" threads-prior-mixed.json review-comments-ours-same-file.json
+assert_equal "silent" \
+  "$(_concurred packages/database/src/schema/isolation.ts summary-concurs.json)" \
+  "an ambiguous line is not an agreement"
+
+it "asks the reviewer to say so, instead of only telling it to keep quiet"
+# The record above can only ever be empty if the prompt never asks for the
+# sentence. The instruction and the thing that reads it ship together, or the
+# bucket on the page is silence by construction.
+_setup "[]" threads-prior-mixed.json
+assert_contains "say so in your summary" \
+  "the block asks for an independent judgement on their findings" -- _pre

@@ -1,0 +1,14 @@
+[
+  {
+    "id": 6001,
+    "in_reply_to_id": null,
+    "path": "packages/database/src/schema/isolation.ts",
+    "line": 20,
+    "original_line": 20,
+    "user": {
+      "login": "claude[bot]",
+      "type": "Bot"
+    },
+    "body": "🔴 **Blocking** — le filtre par organisation manque sur cette requete."
+  }
+]
