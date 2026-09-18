@@ -678,6 +678,85 @@ jobs:
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: ${{ steps.args.outputs.value }}
 
+      # The evidence. `execution_file` is the only record of what the reviewer
+      # actually DID: the result record, the turn count, the tools it was
+      # denied, and every tool call it made. Four steps below read it and none
+      # of them keeps it, so it dies with the runner.
+      #
+      # The run log is not a substitute. It expires after 38 days, and it
+      # carries no `tool_use` records at all — so today it is provable that a
+      # file was in the reviewer's PROMPT, and not provable that the reviewer
+      # READ it. An audit of 23 findings the reviewer missed had to leave 11 of
+      # them undecidable for exactly that reason, which is not a conclusion
+      # about the reviewer, it is the absence of one.
+      #
+      # ══════════════════════════════════════════════════════════════════════
+      # BEFORE LEAVING THIS ON: WHO CAN DOWNLOAD THE FILE.
+      #
+      # This is a reusable workflow. Its jobs run inside the CALLER's run — the
+      # `changed=… kept=…` line this file prints is in Aileaneprod/korbyx's own
+      # run 35072472728 — and an artifact is stored against the run that made
+      # it. So the artifact lands on the CALLING repository and takes the
+      # calling repository's visibility, not this one's.
+      #
+      # On a PUBLIC caller, which includes this repository's own
+      # self-review.yml, "read access" is everybody. Measured 2026-09-18
+      # against actions/runner-images, a public repository nobody here is a
+      # member of:
+      #
+      #   * with no token at all, `GET /repos/{owner}/{repo}/actions/artifacts`
+      #     returns each artifact's name, size and sha256 digest;
+      #   * `GET …/artifacts/{id}/zip` is 401 anonymously, and returns the full
+      #     1.36 MB archive to an ordinary personal token belonging to nobody
+      #     in that organisation.
+      #
+      # A GitHub account is free, so the practical answer is: anyone who wants
+      # it. And what they get is a transcript — the assembled prompt, the
+      # `gh pr diff` output, and the full text of every file the reviewer
+      # opened with `Read`. Where fetch-ticket.sh found a Linear ticket, that
+      # ticket's text is in there too, which is private content even on a repo
+      # whose code is not. Actions redacts secrets from LOGS; it does not
+      # redact a file uploaded as an artifact.
+      #
+      # Every client repository is private today, where this is simply the
+      # audit trail the reviews have been missing. On a public caller it is a
+      # deliberate publication, and it is one line from not being: add
+      # `&& github.event.repository.private` to the `if:` below.
+      # ══════════════════════════════════════════════════════════════════════
+      #
+      # retention-days 90. Anything at or below 38 buys nothing — that is when
+      # the run log this exists to outlive goes. 90 is the ceiling a repository
+      # allows without changing its settings, so it is also the largest value
+      # that is valid on every caller, and it covers the quarter a recall audit
+      # reads back over.
+      #
+      # The `if:` names only has_files, with no `always()` — the ordering
+      # "Classify the review outcome" below solves, for the same reason.
+      # `continue-on-error` on the reviewer keeps the implicit `success()`
+      # true, so this still runs after a FAILED review, which is precisely the
+      # case whose trace is worth having; a run cancelled by
+      # `cancel-in-progress` skips it, as it should. It also names
+      # `execution_file` so that a reviewer that died before writing one is a
+      # skip rather than a warning.
+      #
+      # `continue-on-error` here is the promise that archiving cannot change
+      # the reviewer's outcome. A storage quota, a name collision, an outage in
+      # the upload API: all of them are a red line in the log and nothing else.
+      - name: Archive the reviewer's execution trace
+        if: steps.scope.outputs.has_files == 'true' && steps.claude.outputs.execution_file != ''
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          # Keyed on the commit AND the attempt. v4 refuses a second artifact of
+          # the same name in one run, and re-running the failed jobs of a run
+          # reuses that run — so without the attempt number the re-run's upload
+          # fails, and with `overwrite` instead it would delete the failed
+          # attempt's trace, which is the one that explains anything.
+          name: claude-review-execution-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: ${{ steps.claude.outputs.execution_file }}
+          retention-days: 90
+          if-no-files-found: ignore
+
       # Did the review actually happen? `steps.claude.outcome` was asked that
       # question for months and is not able to answer it. The action validates
       # the turn count AFTER the run and fails the step when `num_turns` exceeds
