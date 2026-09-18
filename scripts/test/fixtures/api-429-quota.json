@@ -1,0 +1,17 @@
+[
+ {
+  "type": "system",
+  "subtype": "init",
+  "message": "Claude Code initialized",
+  "model": "claude-sonnet-5"
+ },
+ {
+  "type": "result",
+  "subtype": "error",
+  "is_error": true,
+  "num_turns": 1,
+  "total_cost_usd": 0,
+  "api_error_status": 429,
+  "terminal_reason": "api_error"
+ }
+]
