@@ -926,3 +926,137 @@ assert_contains "_None in this window._ Every number above is the classifier's."
   "the page says plainly that no human has ruled" -- _report
 assert_contains '"severity_human": "blocking" | "important" | "nit" | "preexisting",' \
   "and prints the fields to write and where to write them" -- _report
+
+# --- what our own prompt told the reviewer not to raise -----------------------
+#
+# Every review of ours is handed a block listing the findings the other reviewer
+# or a human filed first, with the instruction not to post an inline comment on
+# any of them. The criterion on this page counts author-confirmed blocking
+# findings of theirs we did not raise — so some of what it counts is our own
+# instruction, and the page had no way of saying which.
+#
+# post-review.sh records each suppressed finding in the sticky comment's ledger
+# and harvest-feedback.sh reads it back onto the finding as
+# `suppressed_at_review`, `suppressed_concurred` and `suppressed_by`. The three
+# cases below are the three things that record is allowed to do, and the one it
+# is not: it may excuse a miss, it may never turn one into a catch.
+
+# _suppressed CONCURRED BY — one blocking finding of theirs, suppressed.
+_suppressed() {
+  python3 -c "
+import json, sys
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'suppressed_by_us': [{'path': 'a.ts', 'key': 'cafe1234',
+                                        'severity': 'blocking',
+                                        'by': sys.argv[2],
+                                        'concurred': sys.argv[1] == 'yes'}],
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'key': 'Aileaneprod/korbyx#1|a.ts|9|cafe1234',
+                                'finding': '\U0001f534 Blocking — real',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted',
+                                'suppressed_at_review': True,
+                                'suppressed_concurred': sys.argv[1] == 'yes',
+                                'suppressed_by': sys.argv[2]}]}))
+" "$1" "$2" | _seed
+}
+
+it "does not count a finding of theirs our own prompt forbade as a miss"
+_suppressed no coderabbitai
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" \
+  "a miss we instructed is not evidence of recall either way" -- _report
+assert_contains "| suppressed — our prompt told the reviewer not to raise it | 1 | no |" \
+  "it is counted in its own bucket rather than dropped" -- _report
+
+it "keeps a concurrence on its own line and out of our column"
+# The reviewer checked one of their findings itself and called it blocking in
+# its summary. That is the best evidence available that we would have caught it
+# — and it is weak, because the prompt had just shown it the finding. It gets a
+# line; it never gets added to our side of the table.
+_suppressed yes coderabbitai
+assert_contains "| suppressed, and our summary called it blocking anyway | 1 | no |" \
+  "the concurrence is counted separately from the silent suppressions" -- _report
+assert_contains "| blocking, author-confirmed | 0 | 1 |" \
+  "and our own column does not grow by it" -- _report
+
+it "says what the concurrence cannot know, beside the number"
+assert_contains "It cannot tell an independent judgement from agreement with a finding" \
+  "the caveat travels with the figure it qualifies" -- _report
+
+it "ignores a suppression whose thread a human opened"
+# The same block suppresses a human's thread, and a human is not the reviewer we
+# are being measured against. A record left by one of those must not retire a
+# finding of theirs from the criterion — the `by` field is there to say so.
+python3 -c "
+import json
+def f(path, by):
+    return {'reviewer': 'coderabbitai', 'path': path, 'line': 9,
+            'key': 'Aileaneprod/korbyx#1|' + path + '|9|cafe1234',
+            'finding': '\U0001f534 Blocking — real in ' + path,
+            'author_reply': 'Retenu', 'verdict_keyword': 'accepted',
+            'suppressed_at_review': True, 'suppressed_concurred': False,
+            'suppressed_by': by}
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [f('a.ts', 'coderabbitai'), f('b.ts', 'devnine')]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "only the record naming the reviewer under measurement excuses anything" -- _report
+assert_contains "b.ts:9" "the one a human filed first is still named as a miss" -- _report
+
+it "annotates the head-to-head row the suppression actually distorts"
+# The miss list is not the only number this record moves, and it is not the
+# worst. `blocking, author-confirmed | ours | theirs` counts every confirmed
+# blocking finding of theirs, including the ones on pull requests we reviewed
+# and were told to leave alone — which is most of them.
+python3 -c "
+import json
+def f(path, concurred):
+    return {'reviewer': 'coderabbitai', 'path': path, 'line': 9,
+            'finding': '\U0001f534 Blocking — real in ' + path,
+            'author_reply': 'Retenu', 'verdict_keyword': 'accepted',
+            'suppressed_at_review': True, 'suppressed_concurred': concurred,
+            'suppressed_by': 'coderabbitai'}
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [f('a.ts', False), f('b.ts', True), f('d.ts', False),
+                               {'reviewer': 'claude', 'path': 'd.ts', 'line': 2,
+                                'finding': '\U0001f7e0 Important — ours, same file',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted'},
+                               {'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                                'finding': '\U0001f534 Blocking — nobody suppressed this',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| blocking, author-confirmed | 0 | 4 |" "the row itself is unchanged" -- _report
+assert_contains "| of those, suppressed by our own prompt | — | 3 |" \
+  "and it counts the suppressed ones the criterion never sees either" -- _report
+assert_contains "| to adjudicate by hand | 1 | not yet |" \
+  "d.ts is in the bucket the criterion ignores, and still in the row above" -- _report
+assert_contains "| of those, our summary called blocking anyway | — | 1 |" \
+  "including the part we have weak evidence we would have caught" -- _report
+
+it "says how much of the window the record even covers"
+# Every zero in this section is uninformative on a pull request reviewed before
+# post-review.sh began writing the record. A page that prints those zeros
+# without saying so reports "we suppressed nothing" for the whole history.
+assert_contains "no record at all on 1 of them" \
+  "a pull request with no record is not a pull request with an empty one" -- _report
+_suppressed no coderabbitai
+assert_contains "The record exists on 1 of the window's 1 pull request(s)" \
+  "and it says where it does exist" -- _report
+
+it "counts a suppression whose thread is no longer harvested here"
+# A thread deleted or lost to a force-push leaves no finding to flag. The record
+# is then the only evidence that the reviewer was told to leave it alone, and
+# dropping it would shrink the instruction in the direction that flatters us.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'suppressed_by_us': [{'path': 'gone.ts', 'key': 'deadbeef',
+                                        'severity': 'blocking',
+                                        'by': 'coderabbitai', 'concurred': False}],
+                  'findings': []}))
+" | _seed
+assert_contains "| naming a thread no longer on the pull request | 1 |" \
+  "the record outlives the thread, and says so" -- _report
