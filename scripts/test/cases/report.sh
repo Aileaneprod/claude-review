@@ -93,12 +93,21 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin window) |" "a lone accepted blocking is a miss" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" "a lone accepted blocking is a miss" -- _report
 assert_contains "a.ts:9" "the miss is listed, not just counted" -- _report
 
-it "does NOT count it when we also reviewed that pull request"
-# The heuristic is deliberately crude — "they found it, we said nothing" — so it
-# must at least stop counting once we did say something.
+it "still counts it when all we filed on that pull request was another file"
+# RETIRED ASSERTION, kept as a warning. This case used to read
+#
+#     assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" \
+#       "not a miss when we reviewed too"
+#
+# on a fixture where their blocking finding is in a.ts and ours is in b.ts. Its
+# comment called the heuristic "deliberately crude — they found it, we said
+# nothing — so it must at least stop counting once we did say something", and
+# that is the whole error in one sentence: a finding in a DIFFERENT FILE is not
+# an answer to this defect. It made the criterion score our reviewer's
+# attendance, and it was green while it did so.
 python3 -c "
 import json
 print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
@@ -109,7 +118,12 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🟠 Important — ours', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "not a miss when we reviewed too" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "a finding in another file does not answer this defect" -- _report
+assert_contains "| present, silent — it ran and filed nothing in that file | 1 | yes |" \
+  "and it lands in present-silent, not absent" -- _report
+assert_contains "| absent — our reviewer never ran on that pull request | 0 | yes |" \
+  "we were there, and the page still says so" -- _report
 
 it "does not count a rejected blocking finding of theirs as a miss"
 python3 -c "
@@ -119,7 +133,7 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🔴 Blocking — wrong', 'author_reply': 'Écarté',
                                 'verdict_keyword': 'rejected'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "a rejected blocking is not a miss" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" "a rejected blocking is not a miss" -- _report
 
 # --- verdict precedence -------------------------------------------------------
 
@@ -184,7 +198,7 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🟠 Important — y', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "no misses on one PR is not a pass" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" "no misses on one PR is not a pass" -- _report
 assert_contains "| Our precision on judged findings | >= 0.95 | 1.00 | not yet |" "a perfect score on one PR is not a pass either" -- _report
 
 it "still reports a miss it actually saw, however small the window"
@@ -197,7 +211,7 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                                 'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin window) |" "one observed miss still fails" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" "one observed miss still fails" -- _report
 
 # --- silence by choice is not silence by failure ------------------------------
 #
@@ -211,7 +225,28 @@ assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin windo
 # On korbyx#92 that flag is the only evidence we were there: three runs, a
 # reasoned 0/0/0 summary, and zero findings in the ledger.
 
-it "does not count a miss on a pull request we reviewed and stayed silent on"
+it "counts a miss on a pull request we reviewed and stayed silent on"
+# RETIRED ASSERTION, kept as a warning. This case used to read
+#
+#     assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" \
+#       "we were there, so it is not our miss"
+#
+# It was green for its whole life and it encoded a false belief, which in a
+# directory whose rule is "a case must be able to fail" is the most expensive
+# kind of case there is.
+#
+# Why it was wrong: "we were there" answers a question about our PLUMBING. The
+# criterion asks a question about our RECALL — did we raise this defect. A
+# review that ran, read the diff and filed nothing about a defect the author
+# then confirmed as blocking is precisely a recall failure; it is the case the
+# criterion exists to count. Scoring it as zero meant the page could only ever
+# report the pull requests our reviewer failed to REACH, and reported them
+# under a heading that claimed to be about the findings it failed to SEE.
+#
+# The neighbouring distinction it was built on survives and is asserted below:
+# a review that ran and had nothing to file is not scored as ABSENT. It is now
+# scored as present and silent, which is a different bucket and a different
+# repair.
 python3 -c "
 import json
 print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 92, 'title': 't',
@@ -221,7 +256,18 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 92, 'title': 't',
                                 'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 0 | not yet |" "we were there, so it is not our miss" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "present and silent is a miss of recall, and recall is the criterion" -- _report
+assert_contains "| present, silent — it ran and filed nothing in that file | 1 | yes |" \
+  "and it is counted as silent" -- _report
+
+it "still does not score a review that ran and stayed silent as ABSENT"
+# The 2026-09-07 correction, and the part of it that was right. `absent` is a
+# plumbing failure and is displayed on its own, because a review that never ran
+# and a review that ran and saw nothing are not repaired in the same place.
+assert_contains "| absent — our reviewer never ran on that pull request | 0 | yes |" \
+  "a completed review is never counted as absent" -- _report
+assert_not_contains "### absent" "and the absent list is not printed at all" -- _report
 
 it "still counts a miss when nothing says we were there"
 # The same document without the flag. An older ledger entry, or a run that never
@@ -233,7 +279,9 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 92, 'title': 't',
                                 'finding': '🔴 Blocking — real', 'author_reply': 'Retenu',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| Blocking findings only they caught | 0 | 1 | FAIL (thin window) |" "no evidence of us, still a candidate" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" "no evidence of us, still a candidate" -- _report
+assert_contains "| absent — our reviewer never ran on that pull request | 1 | yes |" \
+  "and with nothing saying we were there it is absent, not silent" -- _report
 
 it "counts a pull request we read but did not comment on as reviewed by both"
 python3 -c "
@@ -484,3 +532,239 @@ it "refuses leading zeros on agreed, as it already did on checked"
 assert_status 2 "007 is not how a count is written" -- _report --gold-agreement 007/46
 assert_status 2 "nor is 00" -- _report --gold-agreement 00/46
 assert_contains "| 0.0% (0/46) | FAIL |" "but a bare zero is a real score" -- _report --gold-agreement 0/46
+
+# --- severity is what the reviewer wrote, not what sat first ------------------
+#
+# severity() read the first 400 characters and returned the highest emoji in
+# them. Two things live in that window that are not the reviewer's judgement of
+# this defect:
+#
+#   * the other reviewer's header line, a table row of italic cells whose second
+#     cell is a coarse severity the tool assigns;
+#   * a collapsed `<details>` appendix — a static-analysis transcript, a web
+#     query, a proposed diff — carrying severity emoji of its own.
+#
+# Both are on the other reviewer's side only. Ours carry the emoji at offset 0
+# and emit neither, so every one of these defects ran one way: against the
+# reviewer being measured, on the page deciding whether to switch it off.
+#
+# All fixtures below are synthetic. The header SHAPE is what is under test.
+
+it "lets the prose outrank a header that calls the finding more severe"
+# Header says Critical, prose says important. The prose is the sentence the
+# reviewer wrote about this defect; the header is a bucket the tool picked.
+python3 -c "
+import json
+body = ('_Functional Correctness_ | _\U0001f534 Critical_ | _Quick win_\n'
+        '\n'
+        '\U0001f7e0 Important — the retry budget is not reset between attempts.\n')
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" \
+  "a critical header over an important prose is not a blocking finding" -- _report
+assert_contains "| blocking, author-confirmed | 0 | 0 |" "and it is not counted as one" -- _report
+
+it "lets the prose outrank a header that calls the finding less severe"
+# The other direction, and the one that costs us: 29 findings in the live ledger
+# are labelled Major by the header and blocking by the prose.
+#
+# The blocking sentence sits past character 400 of ordinary prose — no folds,
+# just a long finding. The old rule read the first 400 characters, found the
+# header's Major and nothing else, and filed a blocking finding as important.
+# The cap could only ever understate like this: a severity it cannot see is one
+# it cannot count, and the emoji scan already returns the highest it finds.
+python3 -c "
+import json
+lead = 'The token is assembled from three sources and logged on the way out. ' * 7
+body = ('_Functional Correctness_ | _\U0001f7e0 Major_ | _Quick win_\n'
+        '\n'
+        + lead + '\n\n'
+        '\U0001f534 Blocking — the token is written to the log before it is redacted.\n')
+assert body.index('\U0001f534') > 400
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "a major header does not demote blocking prose" -- _report
+
+it "does not let a folded appendix decide the severity of the prose"
+# The `<details>` block is 400+ characters of transcript carrying a nit emoji,
+# and it sits between the header and the sentence that says blocking. Under the
+# old rule the blocking emoji fell off the end of the 400-character window and
+# the finding counted as a nit.
+python3 -c "
+import json
+filler = 'analysis line that is quoted, not asserted. ' * 12
+body = ('_Functional Correctness_ | _\U0001f7e0 Major_ | _Quick win_\n'
+        '\n'
+        '<details>\n<summary>\U0001f7e1 Supported by static analysis</summary>\n\n'
+        + filler + '\n</details>\n\n'
+        '\U0001f534 Blocking — the migration drops the column before the backfill runs.\n')
+assert len(body) > 400
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "a severity past the old 400-character cap still counts" -- _report
+
+it "unwinds a nested appendix instead of pairing the wrong closing tag"
+# `<details>A<details>B</details>C</details>` — a plain non-greedy pattern pairs
+# the OUTER opening tag with the INNER closing one and lets C escape into the
+# prose. Here C carries a blocking emoji and the real prose is a nit.
+python3 -c "
+import json
+body = ('_Functional Correctness_ | _\U0001f7e1 Minor_ | _Quick win_\n'
+        '\n'
+        '<details>\n<summary>outer</summary>\n'
+        '<details>\n<summary>inner</summary>\ninner text\n</details>\n'
+        '\U0001f534 quoted from somewhere else, inside the fold\n'
+        '</details>\n\n'
+        '\U0001f7e1 Nit — the variable could be named better.\n')
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" \
+  "a severity inside a nested fold stays inside it" -- _report
+
+it "truncates at an unclosed fold rather than reading its whole appendix"
+python3 -c "
+import json
+body = ('_Functional Correctness_ | _\U0001f7e1 Minor_ | _Quick win_\n'
+        '\n'
+        '\U0001f7e1 Nit — the variable could be named better.\n\n'
+        '<details>\n<summary>appendix</summary>\n'
+        '\U0001f534 quoted inside a fold nobody closed\n')
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" \
+  "an unclosed fold is still a fold" -- _report
+
+it "falls back to the header when the prose carries no severity, and says so"
+# The fallback is the only reason a header is read at all, and a label the tool
+# assigned is different evidence from a label the reviewer wrote. The page
+# prints how many there are instead of blending them in.
+python3 -c "
+import json
+body = ('_Functional Correctness_ | _\U0001f534 Critical_ | _Quick win_\n'
+        '\n'
+        'The handler returns before the transaction commits.\n')
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "severity-free prose takes the header's label" -- _report
+assert_contains "| severity read off the header, not the prose | 0 | 1 |" \
+  "and the page prints how many labels came from there" -- _report
+
+it "counts a label as coming from the prose when the prose has one"
+python3 -c "
+import json
+body = ('_Functional Correctness_ | _\U0001f534 Critical_ | _Quick win_\n'
+        '\n'
+        '\U0001f534 Blocking — the handler returns before the transaction commits.\n')
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| severity read off the header, not the prose | 0 | 0 |" \
+  "an agreeing header is not a fallback" -- _report
+
+it "does not eat a prose line that merely happens to be italic end to end"
+# Two or more cells, not one or more. A single `_..._` line is a sentence, and
+# dropping it would throw away the severity the reviewer wrote on it.
+python3 -c "
+import json
+body = '_\U0001f534 Blocking — the whole sentence is emphasised._\n'
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': body, 'author_reply': 'Retenu',
+                                'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "one italic cell is prose, not a header" -- _report
+assert_contains "| severity read off the header, not the prose | 0 | 0 |" \
+  "so its severity is the prose's" -- _report
+
+it "leaves our own findings exactly as they were"
+# Our findings carry the emoji at offset 0 and emit no header and no folds, so
+# every variant above must be a no-op on our side. If one of them is not, the
+# fix has moved the comparison rather than corrected it.
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                                'finding': '\U0001f534 **Bloquant** — the query has no limit.',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted'},
+                               {'reviewer': 'claude', 'path': 'b.ts', 'line': 2,
+                                'finding': '\U0001f7e1 **Nit** — a better name for this.',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| blocking, author-confirmed | 1 | 0 |" "ours still reads its own emoji" -- _report
+assert_contains "| severity read off the header, not the prose | 0 | 0 |" \
+  "and never falls back to a header it does not write" -- _report
+
+# --- overlap is adjudicated, not guessed -------------------------------------
+#
+# Lifting the presence guard exposes findings of theirs that we also raised.
+# Counting those would replace a number that was too low with one that is too
+# high. The rule worth having — same file, intersecting line ranges — cannot be
+# run on the harvested ledger: GitHub nulls a thread's `line` once the thread
+# goes outdated, and it is null on about half the findings on both sides. So
+# the page names the candidates and counts them in neither direction.
+
+it "sends a finding of theirs to adjudication when we filed in the same file"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [{'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': 9,
+                                'finding': '\U0001f534 Blocking — the same defect, maybe',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted'},
+                               {'reviewer': 'claude', 'path': 'a.ts', 'line': 40,
+                                'finding': '\U0001f7e0 Important — something else in a.ts',
+                                'author_reply': 'Retenu', 'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "| to adjudicate by hand | 1 | not yet |" "same file, so a human reads the pair" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" \
+  "and it is counted as neither a miss nor a catch" -- _report
+assert_contains "ours in that file at line(s): 40" "the pair is listed, not just counted" -- _report
+
+it "says the criterion is a floor while anything awaits adjudication"
+assert_contains "It is a FLOOR, not a total" "the page does not let the number read as a total" -- _report
+
+it "prints the criterion's definition beside the criterion"
+# Two questions live on this page — how many FINDINGS of theirs we did not
+# raise, and how many PULL REQUESTS carry one — and a bare number that does not
+# say which it answers is how this page got into trouble.
+assert_contains "findings, not pull requests" "the number says what it counts" -- _report
+
+it "tells two findings apart when the file and the line are the same"
+# `line` is null on about half the ledger, so two blocking findings of theirs
+# in one file print as the same bullet unless something else separates them.
+# A list a human is asked to adjudicate has to name what it is pointing at.
+python3 -c "
+import json
+def f(digest, tag):
+    return {'reviewer': 'coderabbitai', 'path': 'a.ts', 'line': None,
+            'key': 'Aileaneprod/korbyx#1|a.ts|None|' + digest,
+            'finding': '\U0001f534 Blocking — ' + tag,
+            'author_reply': 'Retenu', 'verdict_keyword': 'accepted'}
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [f('aaaa1111', 'one'), f('bbbb2222', 'two')]}))
+" | _seed
+assert_contains "\`a.ts:None\` aaaa1111" "the first is named" -- _report
+assert_contains "\`a.ts:None\` bbbb2222" "and so is the second" -- _report
