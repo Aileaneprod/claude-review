@@ -46,12 +46,20 @@
 #     `acknowledged` are reported separately and excluded from precision — a
 #     finding nobody ruled on is not one anybody accepted, and counting it
 #     either way flatters whoever has more unanswered findings.
-#   * A "miss" here means: they found it, the author confirmed it, and we
-#     posted nothing on that pull request. That is the cheap approximation.
-#     It over-counts when our review ran on an earlier commit than the one
-#     carrying the defect, so treat the list as candidates to read, not a
-#     verdict. Narrowing it needs the reviewed SHA per run, which the workflow
-#     records but this report does not yet read.
+#   * The criterion counts FINDINGS of theirs, not pull requests. Every
+#     author-confirmed blocking finding of theirs lands in exactly one bucket,
+#     and the page prints the bucket beside the number:
+#
+#       absent          our reviewer never ran on that pull request
+#       present, silent it ran and filed nothing in that file
+#       covered         we raised the same defect
+#       to adjudicate   we filed in that file and nobody has yet read the two
+#                       findings side by side
+#
+#     The criterion counts `absent + present, silent`. `absent` is displayed on
+#     its own: a review that never ran is a plumbing failure, and plumbing and
+#     recall are not repaired in the same place. `to adjudicate` is counted in
+#     neither direction and printed in full — see the overlap note on the page.
 #
 # Requires: python3.
 
@@ -78,7 +86,7 @@ while [ "$#" -gt 0 ]; do
     --since-note) [ "$#" -ge 2 ] || die "--since-note requires a value"; since_note="$2"; shift 2 ;;
     --gold-agreement) [ "$#" -ge 2 ] || die "--gold-agreement requires a value"; gold_agreement="$2"; gold_agreement_given=1; shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
-    -h|--help) sed -n '2,56p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,64p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -199,22 +207,131 @@ out_file = os.environ.get("OUT_FILE") or ""
 JUDGED = ("accepted", "partial", "rejected")
 
 
-def severity(text):
-    head = (text or "")[:400]
-    for emoji, label in (("🔴", "blocking"), ("🟠", "important"),
-                         ("🟡", "nit"), ("🟣", "preexisting")):
-        if emoji in head:
+SEVERITIES = (("🔴", "blocking"), ("🟠", "important"),
+              ("🟡", "nit"), ("🟣", "preexisting"))
+
+# The other reviewer prefixes every finding with a one-line table of italic
+# cells, severity always second:
+#
+#     _🎯 Functional Correctness_ | _🟠 Major_ | _⚡ Quick win_
+#
+# TWO or more cells, not one or more. One cell would also match a prose line
+# that merely happens to be italic end to end, and eating that line would throw
+# away a severity the author wrote. Two cells joined by `|` is a table row and
+# nothing else: on the harvest of 2026-09-18 this matched 452 of their 452
+# findings and 0 of our 196, so it is applied to both sides unconditionally
+# rather than keyed on a reviewer name.
+HEADER_LINE = re.compile(r"^\s*_[^_\n]+_(\s*\|\s*_[^_\n]+_)+\s*$")
+
+# Innermost-first, so repetition unwinds nesting instead of pairing an outer
+# opening tag with an inner closing one. `<details>A<details>B</details>C</details>`
+# under a plain non-greedy pattern leaves `C</details>` — C escapes into the
+# prose it was folded away from. 81 of their findings nest; on this corpus the
+# two variants never disagreed about a LABEL, but one of them is right about
+# what it is doing and the other happens to be.
+DETAILS = re.compile(r"<details\b(?:(?!<details\b).)*?</details\s*>",
+                     re.DOTALL | re.IGNORECASE)
+
+
+def split_header(text):
+    """(header line, everything after it). Empty header when there is none."""
+    lines = (text or "").split("\n")
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and HEADER_LINE.match(lines[i]):
+        return lines[i], "\n".join(lines[i + 1:])
+    return "", (text or "")
+
+
+def prose_of(body):
+    """`body` with its collapsed `<details>` blocks removed.
+
+    Those blocks carry static-analysis transcripts, web queries and proposed
+    diffs — text the finding quotes, not text it asserts. They also carry
+    severity emoji of their own, which is how a folded block came to decide a
+    finding's severity.
+    """
+    previous = None
+    current = body
+    while previous != current:
+        previous = current
+        current = DETAILS.sub("", current)
+    # An unclosed `<details>` is prose up to the tag and a fold after it. Two
+    # findings in the ledger have unbalanced tags; without this they would
+    # carry their whole appendix into the scan.
+    cut = current.lower().find("<details")
+    if cut >= 0:
+        current = current[:cut]
+    return current
+
+
+def highest(text):
+    for emoji, label in SEVERITIES:
+        if emoji in text:
             return label
-    return "unlabelled"
+    return None
+
+
+def severity(text):
+    """(label, source) — source is "prose", "header" or "none".
+
+    The whole prose is scanned, not its first 400 characters. The cap had no
+    written justification and it could only ever UNDERSTATE: it hid a 🔴 that
+    sat past the cap behind a 🟠 that sat before it, never the reverse. On the
+    harvest of 2026-09-18 it understated 13 findings and overstated none — a
+    bias that ran one way, against the reviewer being measured.
+
+    The header is a fallback, not a tiebreak. It is a coarse label the tool
+    assigns; the prose is what the reviewer wrote about this defect, and 29
+    findings label the prose MORE severe than the header. Where the prose says
+    nothing the header is all there is, and the page prints how many labels
+    came from it rather than merging the two silently: 118 of 452 here, 111 of
+    them written before korbyx's `.coderabbit.yaml` severity convention landed
+    on 2026-08-11.
+
+    Deliberately no word-based rescue for a `Bloquant` written without its
+    emoji. It would recover two findings, and a keyword scan over free prose is
+    one sentence away from matching a finding that merely discusses blocking.
+    """
+    header, body = split_header(text or "")
+    label = highest(prose_of(body))
+    if label:
+        return label, "prose"
+    label = highest(header)
+    if label:
+        return label, "header"
+    return "unlabelled", "none"
 
 
 def verdict_of(finding):
     # A human's own correction outranks the model, which outranks keywords.
+    #
+    # Worth knowing while reading this page: `verdict_human` appears in 0 of the
+    # 153 ledger documents that carry findings, so the top of this list has
+    # never once fired. The override is available and unused, not disabled —
+    # and out of scope here, which is why this is a comment and not a change.
     for key in ("verdict_human", "verdict_llm", "verdict_keyword", "verdict_guess"):
         value = finding.get(key)
         if value:
             return value
     return "unknown"
+
+
+def tag_of(finding):
+    """A short handle for one finding, so a list a human is asked to read can
+    be read.
+
+    Two blocking findings of theirs on the same file with a null `line` print
+    as the same bullet otherwise — and null is the normal case, not the corner
+    one. `key` is `repo#pr|path|line|digest`, written by harvest-feedback.sh
+    over the finding's own text, so its last field identifies the finding and
+    survives re-anchoring. It is a digest, not the text: nothing quoted from a
+    client repository reaches this page that was not already on it.
+    """
+    key = finding.get("key") or ""
+    digest = key.rsplit("|", 1)[-1] if "|" in key else ""
+    return digest or (finding.get("finding_at") or "")
 
 
 def side(finding):
@@ -250,8 +367,22 @@ for key in ("ours", "theirs"):
     totals[key] = {v: 0 for v in ("accepted", "partial", "rejected",
                                   "acknowledged", "no_reply", "unknown")}
     totals[key]["blocking_accepted"] = 0
+    # How many of that side's severity labels came from the header rather than
+    # from the prose. Printed, never merged in silently: a label the tool
+    # assigned and a label the reviewer wrote are different evidence, and the
+    # page that decides has to be able to say which it is counting.
+    totals[key]["header_label"] = 0
 
-missed = []
+# A confirmed blocking finding of theirs lands in exactly one of these.
+missed_absent = []      # our reviewer never ran
+missed_silent = []      # it ran and filed nothing in that file
+adjudicate = []         # we filed in that file; nobody has compared the two
+#
+# There is no `covered` list. Deciding that we raised the same defect takes a
+# rule for when two findings are the same finding, and the evidence for the one
+# rule worth having is not in the ledger — see the bucketing below. Every
+# candidate goes to `adjudicate` instead, which is why the criterion is a floor
+# and the page says so.
 both_reviewed = 0
 
 for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or 0)):
@@ -262,42 +393,91 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
     # completed run, so a review that read the diff and had nothing to file is
     # no longer indistinguishable from one that never ran.
     #
-    # That distinction is what the miss heuristic below turns on, and getting it
-    # wrong punished the reviewer for the behaviour its own prompt calls "a
-    # valid, frequent, and good outcome". On Aileaneprod/korbyx#92 our reviewer
-    # ran three times and posted a reasoned 0/0/0 summary; the ledger held zero
-    # findings from us, so any blocking finding of theirs there counted as ours
-    # to answer for.
+    # That distinction is what the BUCKETING below turns on, and getting it
+    # wrong labelled the reviewer absent for the behaviour its own prompt calls
+    # "a valid, frequent, and good outcome". On Aileaneprod/korbyx#92 our
+    # reviewer ran three times and posted a reasoned 0/0/0 summary; the ledger
+    # held zero findings from us, so it read as a review that never happened.
+    #
+    # What this flag decides is which bucket, not whether to count. A blocking
+    # finding of theirs on a pull request we were present for is still one we
+    # did not raise; it is a failure of recall rather than of plumbing, and the
+    # page reports the two separately for exactly that reason.
     #
     # `or` and not `=`: a document harvested before the field existed has no
     # opinion, and falls back to the old inference rather than asserting we were
     # absent. Re-harvesting upgrades it; nothing regresses in the meantime.
     present = {"ours": bool(doc.get("reviewed_by_ours")), "theirs": False}
     pr_missed = []
+    ours_here = []
     for finding in doc["findings"]:
         which = side(finding)
         if which is None:
             continue
         present[which] = True
+        if which == "ours":
+            ours_here.append(finding)
         verdict = verdict_of(finding)
         counts[which][verdict] = counts[which].get(verdict, 0) + 1
         if verdict in totals[which]:
             totals[which][verdict] += 1
-        if severity(finding.get("finding")) == "blocking" and verdict in ("accepted", "partial"):
+        label, label_source = severity(finding.get("finding"))
+        if label_source == "header":
+            totals[which]["header_label"] += 1
+        if label == "blocking" and verdict in ("accepted", "partial"):
             totals[which]["blocking_accepted"] += 1
             if which == "theirs":
                 pr_missed.append(finding)
 
     if present["ours"] and present["theirs"]:
         both_reviewed += 1
-    # Only count a blocking finding of theirs as missed when we said nothing at
-    # all on that pull request.
-    if pr_missed and not present["ours"]:
-        for finding in pr_missed:
-            missed.append((repo, number, finding.get("path"), finding.get("line"),
-                           (finding.get("finding") or "")[:0]))
+
+    # The 2026-09-07 correction, kept: a review that ran and had nothing to file
+    # must not score like one that never ran. `reviewed_by_ours` is written by
+    # harvest-feedback.sh from the sticky summary, and korbyx#92 is the case it
+    # was written for — three runs, a reasoned 0/0/0 summary, zero findings.
+    #
+    # The same correction over-reached, and this is where it is walked back. It
+    # said `if pr_missed and not present["ours"]`, so a pull request our reviewer
+    # merely SHOWED UP on scored zero misses however much it failed to see. That
+    # measures our plumbing's availability, not our reviewer's recall, and the
+    # criterion is about recall. Presence now decides which bucket a finding
+    # lands in, not whether it is counted at all.
+    #
+    # Overlap is the reason this is not simply `for finding in pr_missed`. Some
+    # of those findings are defects we raised too, and counting them would swap
+    # a number that was too low for one that is too high. Two findings address
+    # the same defect when they sit on the same file and their line ranges
+    # intersect — except that `line` is null on 225 of their 452 findings and 96
+    # of our 196 (GitHub nulls it on an outdated thread), and where both sides
+    # do carry one it never once matched: 0 exact matches, 3 pairs within fifty
+    # lines, out of 21 same-file candidates. There is no line evidence to rule
+    # on, so nothing is ruled. Same file is treated as necessary-but-not-
+    # sufficient: no finding of ours in that file is scored as not covered, and
+    # a finding of ours in that file is sent to a human, listed by name, and
+    # counted in neither direction.
+    ours_paths = set(f.get("path") for f in ours_here if f.get("path"))
+    for finding in pr_missed:
+        where = (repo, number, finding.get("path"), finding.get("line"),
+                 tag_of(finding))
+        if not present["ours"]:
+            missed_absent.append(where)
+        elif finding.get("path") in ours_paths:
+            adjudicate.append(where + (
+                sorted(set(f.get("line") for f in ours_here
+                           if f.get("path") == finding.get("path")),
+                       key=lambda value: (value is None, value or 0)),))
+        else:
+            missed_silent.append(where)
 
     rows.append((repo, number, doc.get("title") or "", counts, present))
+
+# The criterion: every confirmed blocking finding of theirs that we are known
+# not to have raised. Absent and present-silent both count — one is our
+# plumbing and one is our recall, and the question "did we catch it" does not
+# care which failed. `covered` and `adjudicate` do not count.
+criterion = len(missed_absent) + len(missed_silent)
+criterion_prs = sorted(set((r, n) for r, n, _p, _l, _t in missed_absent + missed_silent))
 
 
 def precision(bucket):
@@ -386,8 +566,8 @@ def verdict(failed, ok):
 
 w("| Exit criterion | Target | Now | |")
 w("|---|---|---|---|")
-w("| Blocking findings only they caught | 0 | %d | %s |"
-  % (len(missed), verdict(bool(missed), True)))
+w("| Blocking findings of theirs we did not raise | 0 | %d | %s |"
+  % (criterion, verdict(bool(criterion), True)))
 precision_verdict = verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)
 if classifier_uncertified and precision_verdict == "PASS":
     precision_verdict = "not yet (provisional)"
@@ -399,6 +579,25 @@ if gold_pct is not None:
          "PASS" if not classifier_uncertified else "FAIL"))
 w("| Pull requests reviewed by both | >= %d | %d | %s |"
   % (MIN_BOTH, both_reviewed, "PASS" if enough else "not yet"))
+w("")
+# The definition travels with the number. Two different questions live on this
+# page — "how many findings of theirs did we not raise" and "on how many pull
+# requests do we have no confirmed blocking finding" — they have different
+# answers, and a bare figure that does not say which one it answers is how this
+# page came to publish a 1 that meant neither.
+w("The first row counts **findings, not pull requests**. It is %d"
+  % criterion)
+w("author-confirmed blocking finding(s) of %s's that we are known not" % theirs_name)
+w("to have raised, spread over %d pull request(s): %d where our reviewer never"
+  % (len(criterion_prs), len(missed_absent)))
+w("ran, and %d where it ran and filed nothing in that file."
+  % len(missed_silent))
+if adjudicate:
+    w("")
+    w("It is a FLOOR, not a total: %d further finding(s) of theirs sit beside one of"
+      % len(adjudicate))
+    w("ours in the same file, and whether those are the same defect is a question")
+    w("this page refuses to answer by guessing. They are listed below, by name.")
 w("")
 
 w("## Both reviewers, side by side")
@@ -413,24 +612,84 @@ w("| **precision** | **%s** | **%s** |" % (pct(ours_p), pct(theirs_p)))
 w("| judged (the denominator) | %d | %d |" % (ours_judged, theirs_judged))
 w("| blocking, author-confirmed | %d | %d |"
   % (totals["ours"]["blocking_accepted"], totals["theirs"]["blocking_accepted"]))
+w("| severity read off the header, not the prose | %d | %d |"
+  % (totals["ours"]["header_label"], totals["theirs"]["header_label"]))
 w("")
 w("Precision counts `accepted` plus half credit for `partial`, over findings the")
 w("author actually judged. `no reply` and `acknowledged` are excluded, not")
 w("counted as wrong — a finding nobody ruled on is not one anybody accepted.")
 w("")
+w("The last row is a caveat on the one above it. Severity is read from the")
+w("finding's own prose, with its collapsed `<details>` appendices removed; where")
+w("the prose carries no severity at all, the label falls back to the tool's")
+w("header line. Those labels are the tool's, not the reviewer's, and the count")
+w("says how many of them there are rather than blending them in unannounced.")
+w("")
 
-w("## Blocking findings only they caught")
+w("## Blocking findings of theirs we did not raise")
 w("")
-if not missed:
-    w("_None in this window._")
-else:
-    w("Each is a blocking finding the author confirmed, on a pull request where we")
-    w("said nothing. Read them before trusting the number: this over-counts when our")
-    w("review ran on an earlier commit than the one carrying the defect.")
+w("Every author-confirmed blocking finding of %s's sits in exactly one bucket."
+  % theirs_name)
+w("The criterion above is the first two rows added together.")
+w("")
+w("| Bucket | Findings | In the criterion |")
+w("|---|---|---|")
+w("| absent — our reviewer never ran on that pull request | %d | yes |"
+  % len(missed_absent))
+w("| present, silent — it ran and filed nothing in that file | %d | yes |"
+  % len(missed_silent))
+w("| covered — we raised the same defect | — | no |")
+w("| to adjudicate by hand | %d | not yet |" % len(adjudicate))
+w("")
+w("`absent` and `present, silent` are both counted and kept apart: a review that")
+w("never ran is a plumbing failure, a review that ran and saw nothing is a recall")
+w("failure, and they are not repaired in the same place. This row pair used to be")
+w("one row holding `absent` alone, which measured whether our reviewer was")
+w("available rather than whether it saw anything.")
+w("")
+
+if missed_absent:
+    w("### absent — our reviewer never ran")
     w("")
-    for repo, number, path, line, _ in missed:
-        w("- %s#%s `%s:%s`" % (repo, number, path, line))
-w("")
+    for repo, number, path, line, tag in missed_absent:
+        w("- %s#%s `%s:%s` %s" % (repo, number, path, line, tag))
+    w("")
+
+if missed_silent:
+    w("### present, silent — it ran and filed nothing in that file")
+    w("")
+    for repo, number, path, line, tag in missed_silent:
+        w("- %s#%s `%s:%s` %s" % (repo, number, path, line, tag))
+    w("")
+
+if not missed_absent and not missed_silent:
+    w("_None in this window._")
+    w("")
+
+# The fourth bucket, and why it is a bucket rather than a rule. Guessing here
+# would be the same mistake the presence guard made, in the other direction: a
+# title-similarity rule that scores `covered` invents coverage, and counting
+# every candidate as a miss invents misses.
+if adjudicate:
+    w("### to adjudicate by hand")
+    w("")
+    w("Two findings address the same defect when they sit on the same file and")
+    w("their line ranges intersect. That rule cannot be run on this ledger: GitHub")
+    w("nulls a thread's `line` once the thread goes outdated, and it is null on")
+    w("half of both sides' findings. Where both sides did carry a line, it matched")
+    w("exactly zero times out of the candidates below. So no finding here is")
+    w("scored `covered` and none is scored a miss — each is a pair a human reads.")
+    w("")
+    w("Same file is treated as necessary but not sufficient: a finding of theirs")
+    w("with nothing of ours anywhere in that file is counted as a miss above.")
+    w("")
+    # `—` where a line is null, which is most of them, and is the whole reason
+    # this list exists rather than a rule.
+    for repo, number, path, line, tag, ours_lines in adjudicate:
+        w("- %s#%s `%s:%s` %s — ours in that file at line(s): %s"
+          % (repo, number, path, line, tag,
+             ", ".join(str(l) if l is not None else "—" for l in ours_lines)))
+    w("")
 
 w("## Per pull request")
 w("")
