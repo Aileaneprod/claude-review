@@ -26,10 +26,30 @@
 #       flushes the buffered inline comments, so a count taken at post time can
 #       miss the comments the run has just made.
 #
+#       The same file carries the SUPPRESSION RECORD: one {path, key, severity,
+#       by} entry per finding this run tells the reviewer not to file, because
+#       the other reviewer or a human posted it first. It rides --live-counts-out
+#       rather than a flag of its own because review.yml already hands that one
+#       file from `pre` to `post`, and the workflow is versioned separately from
+#       the scripts it calls — a new flag would go dark on every consumer still
+#       pinned to the old workflow.
+#
+#       `key` is sha256(the thread's opening comment)[:8] — byte for byte the
+#       digest harvest-feedback.sh keys a finding by, and the digest inside the
+#       `key` classify-verdicts.sh writes. That is the whole point: the ledger
+#       and this record join without either side learning a new identifier.
+#
 # post  Recover the summary the reviewer produced, then upsert it as the sticky
 #       comment: PATCH the one carrying the marker if it exists, POST otherwise.
 #       A base64 JSON ledger of finding hashes is embedded in an HTML comment so
 #       the next `pre` run can read it back.
+#
+#       That ledger (version 2) also carries the suppression record `pre`
+#       measured, unioned with the one the previous sticky held, and for each
+#       entry whether THIS summary independently called that finding blocking.
+#       The sticky comment is the only durable place for it: harvest-feedback.sh
+#       already reads this comment's body, so nothing new has to be fetched for
+#       the record to reach the ledger and, from there, the page.
 #
 #       The summary is taken from the action's execution file (a JSON array of
 #       SDK messages; we want the last assistant text block). If that yields
@@ -84,7 +104,7 @@ while [ "$#" -gt 0 ]; do
     --body-file)      [ "$#" -ge 2 ] || die "--body-file requires a value";      body_file="$2";      shift 2 ;;
     --posted-out)     [ "$#" -ge 2 ] || die "--posted-out requires a value";     posted_out="$2";     shift 2 ;;
     --dry-run)        dry_run=1; shift ;;
-    -h|--help)        sed -n '2,51p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,71p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done
@@ -262,6 +282,7 @@ if [ "$mode" = "pre" ]; then
   python3 - "${work_dir}/issue.json" "${work_dir}/threads.json" "$out_file" \
             "$live_counts_out" "$MARKER" "$LEDGER_PREFIX" "$LEDGER_SUFFIX" <<'PY'
 import base64
+import hashlib
 import json
 import sys
 
@@ -335,6 +356,32 @@ ours_live, ours_resolved, ours_outdated, theirs, vanished = [], [], [], [], []
 counts = dict((name, 0) for _, name in SEVERITIES)
 seen = set()
 
+# What the block below TELLS THE REVIEWER NOT TO RAISE, written down so the
+# number built on top of it can say so.
+#
+# report.sh publishes one exit criterion — author-confirmed blocking findings
+# the other reviewer raised and we did not — and the `theirs` section of this
+# very file is an instruction not to raise them. Left unrecorded, that metric
+# partly measures our own instruction, and it degrades on its own as the other
+# reviewer gets faster at posting.
+#
+# Measured on the korbyx ledger (231 harvested pull requests, read-only):
+#   * 26 pull requests carried at least one finding of theirs BEFORE our first
+#     sticky summary — 55 findings, 16 blocking, 9 of those author-confirmed;
+#   * on the 120 pull requests where both reviewers spoke, 330 of their findings
+#     and 53 of their blocking ones were on the pull request while some re-review
+#     of ours was being told not to repeat them. That is the range this record
+#     replaces with a fact.
+# Three of those are already known by name: korbyx#155 (our only delivered
+# review had the finding in this list), #19 and #166.
+#
+# `key` is the digest harvest-feedback.sh keys a finding by — sha256 of the
+# thread's opening comment, first 8 hex — so a consumer can join this record to
+# the harvested finding without either side learning a new identifier. `by` is
+# kept because a human's thread is suppressed here too, and a human is not the
+# other reviewer.
+suppressed = []
+
 threads = load(threads_path, {})
 complete = bool(threads.get("complete", True))
 
@@ -358,6 +405,18 @@ for thread in threads.get("nodes") or []:
     entry = "- `%s` — %s" % (where(path, line), title)
     if not posted_by_us(opener.get("author")):
         theirs.append(entry)
+        body = opener.get("body") or ""
+        suppressed.append({
+            "path": path,
+            "key": hashlib.sha256(body.encode("utf-8")).hexdigest()[:8],
+            # THEIR label, read through our emoji table. CodeRabbit opens with
+            # `_🔒 Security & Privacy_ | _🔴 Critical_ | …`, so the 16 blocking
+            # ones in the measurement above were found exactly this way. None
+            # means they did not label it in a way we can read, not that it is
+            # harmless.
+            "severity": severity_of(body),
+            "by": ((opener.get("author") or {}).get("login") or "").lower(),
+        })
     elif thread.get("isResolved"):
         ours_resolved.append(entry)
     elif thread.get("isOutdated"):
@@ -400,8 +459,21 @@ SECTIONS = (
     ("Posted by you, on lines the diff has since changed. Do not repeat as "
      "written — raise it again only if the new code still has the problem",
      ours_outdated),
-    ("Posted by the other reviewer or by a human. Do not repeat them; they are "
-     "not yours to count", theirs),
+    # The inline comment stays suppressed — two threads saying the same thing
+    # is a real cost to the author, on every pull request, and that is why this
+    # instruction exists. What changes is that silence is no longer the only
+    # thing we can say. If the reviewer checks one of these itself and thinks it
+    # blocking, it says so in the summary, and `post` records that against the
+    # finding's key. The form asked for is a line carrying 🔴 and the path,
+    # because those two survive translation and the words do not: korbyx runs
+    # with `language: français` and this repository has already shipped one
+    # guard that matched English prose and could never fire there.
+    ("Posted by the other reviewer or by a human. Do not post an inline comment "
+     "on any of them — the author has read them, and they are not yours to "
+     "count. If you check one against the code yourself and independently judge "
+     "it blocking, say so in your summary, on a line carrying 🔴 and the file "
+     "path in backticks. Write that line only for a problem you verified in the "
+     "code; saying nothing is read as having no opinion", theirs),
     ("Recorded by an earlier run and not among the pull request's current "
      "threads. Do not repeat them", vanished),
 )
@@ -418,15 +490,22 @@ with open(out_path, "w", encoding="utf-8", newline="\n") as handle:
 if counts_path:
     payload = dict(counts)
     payload["complete"] = complete
+    # Always present, even empty: a consumer must be able to tell "this run
+    # suppressed nothing" from "this run predates the record", and an absent key
+    # says only the second.
+    payload["suppressed"] = suppressed
     with open(counts_path, "w", encoding="utf-8", newline="\n") as handle:
         json.dump(payload, handle, indent=1, sort_keys=True)
         handle.write("\n")
 
 sys.stderr.write(
     "post-review: %d prior finding(s) loaded; %d still standing and ours "
-    "(%d blocking, %d important, %d nit); read %s\n"
+    "(%d blocking, %d important, %d nit); %d not ours and suppressed "
+    "(%d blocking); read %s\n"
     % (len(seen), len(ours_live), counts["blocking"], counts["important"],
-       counts["nit"], "complete" if complete else "INCOMPLETE"))
+       counts["nit"], len(suppressed),
+       sum(1 for item in suppressed if item["severity"] == "blocking"),
+       "complete" if complete else "INCOMPLETE"))
 PY
   exit 0
 fi
@@ -672,8 +751,30 @@ if led_pre in summary:
 # Last, so it reaches the recovered text and the adopted fallback alike.
 summary = with_standing(summary)
 
+# Which files WE have an inline finding on. It changes nothing about the ledger
+# below; it is read once, to refuse an ambiguous concurrence.
+#
+# REST spells the account with the `[bot]` suffix GraphQL omits (`claude[bot]`
+# against `claude`), and `type` is the property a human account cannot hold —
+# `gh api users/claude` returns a real human created 2009-05-07. Measured on
+# korbyx#92 and #139, and restated here because this heredoc is a separate
+# program from the one in `pre`.
+OUR_POSTERS = ("claude", "github-actions")
+
+
+def posted_by_us(user):
+    user = user or {}
+    if user.get("type") != "Bot":
+        return False
+    login = (user.get("login") or "").lower()
+    if login.endswith("[bot]"):
+        login = login[:-len("[bot]")]
+    return login in OUR_POSTERS
+
+
 findings = []
 seen = set()
+our_paths = set()
 for comment in review_comments:
     # A reply is the conversation about a finding, not a finding. REST returns
     # every review comment flat, and on a busy pull request the replies are the
@@ -688,6 +789,8 @@ for comment in review_comments:
     title = first_line(comment.get("body"))
     if not path or not title:
         continue
+    if posted_by_us(comment.get("user")):
+        our_paths.add(path)
     digest = hashlib.sha256(
         ("%s|%s|%s" % (path, line, title)).encode("utf-8")
     ).hexdigest()
@@ -696,8 +799,116 @@ for comment in review_comments:
     seen.add(digest)
     findings.append({"path": path, "line": line, "title": title, "hash": digest})
 
+# --- what we told this run's reviewer not to file ---------------------------
+#
+# `pre` measured it (see the comment on `suppressed` there) and handed it over in
+# the counts file. It is written into the sticky comment because that is the one
+# artefact of ours that survives on the pull request, and harvest-feedback.sh
+# already reads this comment's body to answer "were we here at all" — so the
+# record reaches the ledger without a new API call or a new contract.
+#
+# Nothing downstream consumes it yet. That is deliberate: report.sh is the page
+# that must change, and the number it publishes cannot be split into a bucket
+# that does not exist in the data first.
+
+# One sticky comment holds every run's record, so the list is unioned rather
+# than replaced. Two runs differ: a later one can read fewer threads (the read
+# is allowed to come back incomplete) or none at all when the `pre` step, which
+# is continue-on-error, failed — and on korbyx#155 the ONLY delivered review of
+# the commit that mattered is the one whose list holds the finding. A snapshot
+# would drop exactly that evidence on the next push.
+#
+# The cost is that a thread deleted since stays recorded. The claim made is "at
+# some run, the reviewer was told not to file this", which stays true.
+SUPPRESSED_LIMIT = 100
+
+
+def clean_suppressed(entries):
+    """Keep the well-formed entries of a suppression list, whatever wrote it."""
+    out = []
+    for item in entries if isinstance(entries, list) else []:
+        if not isinstance(item, dict) or not item.get("path") or not item.get("key"):
+            continue
+        out.append({"path": item["path"], "key": item["key"],
+                    "severity": item.get("severity"), "by": item.get("by"),
+                    "concurred": bool(item.get("concurred"))})
+    return out
+
+
+def ledger_of(body):
+    if led_pre not in (body or ""):
+        return {}
+    chunk = body.split(led_pre, 1)[1].split(led_suf, 1)[0].strip()
+    try:
+        return json.loads(base64.b64decode(chunk).decode("utf-8"))
+    except Exception:
+        return {}
+
+
+# Did the reviewer say, in its own summary, that one of the suppressed findings
+# is blocking? That sentence is the only signal that separates "we would have
+# caught it" from "we were told not to raise it", and the instruction in `pre`
+# asks for it in the one form that survives `language: français`: a line
+# carrying 🔴 and the path.
+#
+# What this CANNOT do, and the record must not be read as doing:
+#   * it cannot tell an independent judgement from agreement with a finding the
+#     prompt has just shown the reviewer. Nothing observable can.
+#   * absence of the line is not "we would have missed it". It is no opinion,
+#     and a consumer that counts it either way is inventing data.
+# So the match is deliberately strict and errs toward recording nothing: the
+# full path, on a line that also carries 🔴, and never on a file where we filed
+# an inline finding of our own — there the line is at least as likely to be
+# about ours, and a concurrence credited to us by accident flatters exactly the
+# number this record exists to keep honest.
+def concurring_paths(text, entries):
+    hits = set()
+    for line in (text or "").splitlines():
+        if "🔴" not in line:
+            continue
+        for item in entries:
+            if item["path"] not in our_paths and item["path"] in line:
+                hits.add(item["path"])
+    return hits
+
+
+suppressed = clean_suppressed(prior_live.get("suppressed"))
+known = dict(((item["path"], item["key"]), item) for item in suppressed)
+for item in clean_suppressed(ledger_of(existing[0].get("body") if existing else "")
+                             .get("suppressed")):
+    slot = known.get((item["path"], item["key"]))
+    if slot is None:
+        if len(suppressed) >= SUPPRESSED_LIMIT:
+            continue
+        known[(item["path"], item["key"])] = item
+        suppressed.append(item)
+    else:
+        # Once stated, a concurrence is not withdrawn by a later run that stayed
+        # silent about it; silence is not a retraction, it is no opinion.
+        slot["concurred"] = slot["concurred"] or item["concurred"]
+        if slot["severity"] is None:
+            slot["severity"] = item["severity"]
+
+agreed = concurring_paths(summary, suppressed)
+for item in suppressed:
+    if item["path"] in agreed:
+        item["concurred"] = True
+
+if suppressed:
+    sys.stderr.write(
+        "post-review: %d finding(s) of theirs were suppressed for this pull "
+        "request, %d of them blocking; the summary independently calls %d "
+        "blocking\n"
+        % (len(suppressed),
+           sum(1 for item in suppressed if item["severity"] == "blocking"),
+           sum(1 for item in suppressed if item["concurred"])))
+
+# Version 2 adds `suppressed`. `pre` reads `findings` only and does not look at
+# the version, so an old sticky and a new one are both readable; the number is
+# there for whatever reads this next, which must be able to tell an empty list
+# from a ledger written before anyone was recording.
 ledger = base64.b64encode(
-    json.dumps({"version": 1, "findings": findings},
+    json.dumps({"version": 2, "findings": findings, "suppressed": suppressed},
                sort_keys=True).encode("utf-8")
 ).decode("ascii")
 
