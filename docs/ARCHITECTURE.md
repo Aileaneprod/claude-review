@@ -91,6 +91,22 @@ the summary states plainly that the review was partial and why. Changed lines
 are counted **only over files that survived exclusion**, so a regenerated
 lockfile cannot push a small PR into triage.
 
+That risk vocabulary is a **floor, not the whole rule**, and it stopped being
+the whole rule for a measured reason. It is an English keyword list, and on a
+French codebase it is blind: triage cut korbyx#218 from 31 kept files to 2,
+#202 from 39 to 3, #82 from 42 to 9, and four author-confirmed blocking
+findings were missed because their file was named in the wrong language.
+`measures-query.ts` survived only because "query" happens to be an English
+word. So the flagged files are kept unconditionally — past the budget, if there
+are more than the budget — and the rest of a 25-file budget is filled by lines
+changed, descending. A line count cannot be written in the wrong language, and
+a pull request is usually about the files it changes most. A configurable
+vocabulary was considered and rejected: it fails closed the same way for the
+next language, and asks every repository to guess in advance which words will
+matter. The consequence is deliberate and worth stating: triage is no longer a
+quota saving, it is a bound on the work. Guards 0–5 are where quota is saved;
+guard 6 only decides where a review that is happening anyway should look.
+
 ## The reviewer cannot modify code
 
 `--allowedTools` grants exactly: the inline-comment MCP tool, `gh pr diff`,
@@ -260,6 +276,35 @@ Consequences:
 - The prompts are the deliverable and are fine to publish.
 - Secrets do not travel with the workflow. Every calling repo needs its own
   `CLAUDE_CODE_OAUTH_TOKEN`.
+
+### An artifact takes the CALLER's visibility, not this repository's
+
+Worth writing down because it is the opposite of the intuition, and because the
+decision it forces is easy to get wrong twice. This is a reusable workflow: its
+jobs run inside the caller's run, and an artifact is stored against the run that
+made it. So the reviewer's execution trace lands on the **calling** repository
+and inherits **its** visibility — not this repo's, and not the visibility of the
+workflow that produced it.
+
+Measured against a public repository on 2026-09-18, with no relationship to it:
+`GET /repos/{owner}/{repo}/actions/artifacts` returns each artifact's name, size
+and digest **with no token at all**, and `GET …/artifacts/{id}/zip` returns the
+full archive to any ordinary personal token. A GitHub account is free, so on a
+public caller the practical answer is *anyone who asks*.
+
+What that would publish is a transcript: the assembled prompt, the `gh pr diff`
+output, the full text of every file the reviewer opened, and the Linear ticket
+where `fetch-ticket.sh` found one — private content on a repository whose code
+is not. **Actions redacts secrets from logs; it does not redact a file uploaded
+as an artifact.**
+
+Hence `archive_public_trace`, default false: a private caller archives silently,
+a public one does not archive until it says so in its own `with:`, where a human
+reads it and where a pull request against the reviewed repository cannot reach.
+That is also why the input carries a default at all, against the rule that
+config-mirroring inputs must not — the safe value has to hold when nobody has
+written anything, and a key in `.claude-review.yml` would put a publication
+decision inside the repository being reviewed.
 
 ## Failure is always non-blocking
 
