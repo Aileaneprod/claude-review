@@ -142,6 +142,17 @@ contributions.
 
 N pushes produce one summary, edited in place, not N summaries.
 
+That comment is also where a measurement lives, which is not obvious from
+looking at it. The `pre` run tells the reviewer not to file an inline comment on
+a finding the other reviewer already posted — and the page that decides whether
+to keep that other reviewer counts exactly those findings against us. So the
+instruction was silently part of its own measurement. `post` now writes the list
+of what was suppressed into the comment's embedded ledger, and
+`harvest-feedback.sh` reads it back into the ledger record, so the page can say
+which part of the gap between the two columns is our own prompt. The consequence
+to keep in mind when editing any of the three: the sticky comment is a data
+store, and deleting one deletes evidence, not just a summary.
+
 Because it is edited in place, that one summary is the pull request's **standing
 verdict**, not a log of the last push — so its counts have to cover findings
 raised by earlier runs that nobody has settled. The reviewer cannot supply them:
