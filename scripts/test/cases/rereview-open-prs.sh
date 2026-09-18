@@ -42,6 +42,7 @@ _runs() {
 _setup() {
   export GH_LOG="$TESTTMP/rrp-gh.log"
   export GH_FIX="$TESTTMP/rrp"
+  export GH_BREAK="${2:-}"
   mkdir -p "$GH_FIX"
   : > "$GH_LOG"
 
@@ -71,6 +72,9 @@ _setup() {
         cat "$GH_FIX/pulls.json" ;;
       *check-runs*)
         sha="$(printf '%s' "$*" | sed -n 's|.*/commits/\([0-9a-f]*\)/check-runs.*|\1|p')"
+        # GH_BREAK lets one case make a single read fail the way the API does:
+        # a non-zero status, or a body nothing can parse.
+        [ "${GH_BREAK:-}" = "refuse-$sha" ] && return 1
         cat "$GH_FIX/checks-${sha}.json" ;;
       *actions/runs\?head_sha=*)
         sha="$(printf '%s' "$*" | sed -n 's|.*head_sha=\([0-9a-f]*\).*|\1|p')"
@@ -145,3 +149,54 @@ it "says when the repository cannot tell it the truth"
 _setup no-checks
 assert_contains "checks: write" "names the missing permission" -- _report
 assert_contains "floor, not a count" "refuses to present zero as a clean sweep" -- _report
+
+# A wrapper that merely MENTIONS the permission is not a wrapper that grants
+# it. `grep 'checks: *write'` matched a commented-out line and the sentence
+# docs/SETUP.md tells people to paste — and then went quiet about the exact
+# blind spot it is there to announce, which is worse than not looking.
+it "is not satisfied by a wrapper that only mentions the permission"
+_setup no-checks
+printf 'jobs:\n  review:\n    permissions:\n      # add `checks: write` here\n      #checks: write\n' \
+  > "$GH_FIX/wrapper.yml"
+assert_contains "floor, not a count" "a commented permission still warns" -- _report
+
+# --- a read that failed is not a pull request with a review ------------------
+#
+# Every one of these turned an inspection failure into a clean bill of health,
+# which is the same defect the `checks: write` preflight exists to prevent —
+# and the clean-sweep line is the sentence a maintainer acts on by doing
+# nothing at all.
+
+_setup_one() {
+  _setup "${1:-checks}" "${2:-}"
+  # One reviewed pull request and one whose check runs cannot be read. Without
+  # the second, there is nothing to hide behind a clean sweep.
+  printf '[[{"number":228,"head":{"sha":"%s","ref":"branch-a"}},{"number":229,"head":{"sha":"%s","ref":"branch-b"}}]]\n' \
+    "$_A" "$_B" > "$GH_FIX/pulls.json"
+}
+
+it "never calls it a clean sweep when a check run could not be read"
+_setup_one checks "refuse-$_A"
+assert_not_contains "carries a review" "no clean bill of health on a failed read" -- _report
+assert_contains "could not be inspected" "says how many it could not look at" -- _report
+assert_status 1 "and carries that in the exit status, for a caller reading no output" -- \
+  "$SCRIPTS/rereview-open-prs.sh" --repo o/r
+
+it "never calls it a clean sweep when the check runs came back unreadable"
+_setup_one
+printf 'not json at all\n' > "$GH_FIX/checks-$_A.json"
+assert_not_contains "carries a review" "an unparseable body is not an absent check" -- _report
+assert_contains "NOT inspected" "names the pull request it could not inspect" -- _report
+
+it "refuses to read an unparseable pull request list as an empty one"
+_setup
+printf 'not json at all\n' > "$GH_FIX/pulls.json"
+assert_not_contains "no open pull requests" "silence from a failed parse is not an empty repository" -- _report
+assert_status 1 "stops instead" -- "$SCRIPTS/rereview-open-prs.sh" --repo o/r
+
+# --- the query has to ask the question it was given --------------------------
+
+it "percent-encodes the whole check name, not only its spaces"
+_setup
+_report --check 'weird & name?' >/dev/null
+assert_contains "weird%20%26%20name%3F" "encodes & and ? too" -- _log
