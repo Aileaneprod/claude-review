@@ -57,6 +57,13 @@ it "keeps every config-mirroring input defaulting to empty in review.yml"
 # anything is checked out, so `.claude-review.yml` has not been read and cannot
 # be. A default here is therefore not shadowing config — it is the only place
 # the value can come from apart from the caller's `with:`.
+#
+# archive_public_trace is exempt on the same ground and one of its own: it
+# decides whether the reviewer's execution trace is PUBLISHED on a public
+# caller, and the safe value has to hold when nobody wrote anything. A key in
+# `.claude-review.yml` would put that decision in the reviewed repository's own
+# config, where a pull request can edit it — which is the one place a decision
+# about publishing that repository's prompts and tickets must not live.
 _defaults_report() {
   python3 -c "
 import sys, yaml
@@ -65,7 +72,8 @@ doc = yaml.safe_load(open(sys.argv[1], encoding='utf-8'))
 # workflow trigger block is doc[True], not doc['on'].
 trigger = doc.get('on', doc.get(True))
 inputs = trigger['workflow_call']['inputs']
-exempt = {'tooling_ref', 'tooling_repo', 'use_github_app', 'review_drafts'}
+exempt = {'tooling_ref', 'tooling_repo', 'use_github_app', 'review_drafts',
+          'archive_public_trace'}
 bad = [n for n, spec in inputs.items()
        if n not in exempt and str(spec.get('default', '')) not in ('', 'None')]
 print(' '.join(sorted(bad)) if bad else 'none')

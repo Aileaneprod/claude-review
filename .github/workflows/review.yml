@@ -106,6 +106,17 @@ on:
           refuses to run otherwise. See docs/SETUP.md.
         type: boolean
         default: true
+      archive_public_trace:
+        description: >-
+          Archive the reviewer's execution trace on a PUBLIC repository too.
+          Off by default, and the default is the whole point: on a public
+          caller the artifact is downloadable by anyone with a free GitHub
+          account, and it carries the assembled prompt, the diff, the full text
+          of every file the reviewer read, and the Linear ticket when one was
+          fetched. A private repository archives its trace either way. Read the
+          boxed comment above the archive step before turning this on.
+        type: boolean
+        default: false
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude Code OAuth token from `claude setup-token`."
@@ -720,8 +731,14 @@ jobs:
       #
       # Every client repository is private today, where this is simply the
       # audit trail the reviews have been missing. On a public caller it is a
-      # deliberate publication, and it is one line from not being: add
-      # `&& github.event.repository.private` to the `if:` below.
+      # PUBLICATION, so it does not happen unless the caller says so:
+      # `archive_public_trace`, default false. The exposure is nil today — the
+      # one public caller is this repository's own self-review, which passes no
+      # LINEAR_API_KEY — but "nil today" is not a property anyone maintains. A
+      # public client repository that passes a Linear key would publish its
+      # tickets to anyone with a free account, silently, and nothing in the run
+      # would say so. The default is the guard; the input is the deliberate
+      # exception, and it reads like one at the call site.
       # ══════════════════════════════════════════════════════════════════════
       #
       # retention-days 90. Anything at or below 38 buys nothing — that is when
@@ -743,7 +760,7 @@ jobs:
       # the reviewer's outcome. A storage quota, a name collision, an outage in
       # the upload API: all of them are a red line in the log and nothing else.
       - name: Archive the reviewer's execution trace
-        if: steps.scope.outputs.has_files == 'true' && steps.claude.outputs.execution_file != ''
+        if: steps.scope.outputs.has_files == 'true' && steps.claude.outputs.execution_file != '' && (github.event.repository.private || inputs.archive_public_trace)
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:

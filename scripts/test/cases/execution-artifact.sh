@@ -101,6 +101,47 @@ assert_equal "" "$(_condition | grep -o 'steps.claude.outcome')" \
 assert_equal "" "$(_condition | grep -o 'steps.verdict')" \
   "nor on the verdict, which is computed after it"
 
+# --- a public caller publishes, so it has to ask --------------------------------
+#
+# On a public repository this artifact is downloadable by anyone with a free
+# GitHub account — measured against a public repo on 2026-09-18: the listing
+# endpoint answers without a token at all, and the zip comes back to any
+# ordinary personal token. What it holds is the assembled prompt, the diff, the
+# text of every file the reviewer read, and the Linear ticket where one was
+# fetched. Tickets are private content on a repository whose code is not.
+#
+# The exposure is nil today — the one public caller is this repository's own
+# self-review, which passes no LINEAR_API_KEY — and "nil today" is not a
+# property anybody maintains. So the private case archives silently and the
+# public case does not archive until a caller writes `archive_public_trace`
+# into its `with:`, where a human reads it.
+
+it "does not publish a trace on a public repository unless the caller asked"
+
+assert_contains "github.event.repository.private" \
+  "a private caller archives without asking" -- _condition
+assert_contains "inputs.archive_public_trace" \
+  "a public one only when it opted in" -- _condition
+
+_input_default() {
+  python3 - "$SCRIPTS/../.github/workflows/review.yml" <<'PY'
+import io
+import re
+import sys
+
+text = io.open(sys.argv[1], encoding="utf-8").read()
+block = re.search(r"\n      archive_public_trace:\n(.*?)(?=\n      \w|\n    \w)",
+                  text, re.S)
+if not block:
+    print("absent")
+    raise SystemExit(0)
+found = re.search(r"^\s+default:\s*(\S+)\s*$", block.group(1), re.M)
+print(found.group(1) if found else "no default")
+PY
+}
+assert_equal "false" "$(_input_default)" \
+  "and the input it opts in with is off until someone writes it"
+
 # --- it must outlive the run log ---------------------------------------------
 
 it "keeps the trace longer than the log it replaces"
