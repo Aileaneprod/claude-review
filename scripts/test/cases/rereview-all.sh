@@ -147,7 +147,7 @@ _ra_setup
 _ra_wrapper o/one
 _ra_list o/gone o/one
 assert_contains "o/one" "the repositories after it are still swept" -- _ra --rerun --budget 5
-assert_contains "could not be checked" "the report says one entry is broken" -- _ra --rerun --budget 5
+assert_contains "did not come back clean" "the report says one entry is broken" -- _ra --rerun --budget 5
 assert_status 1 "a broken roster entry fails the run" -- _ra --rerun --budget 5
 
 # --- the blind spot has to survive the trip to the summary -------------------
