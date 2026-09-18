@@ -18,6 +18,11 @@
 # whether the code underneath changed, and — critically — the commit the finding
 # was made against.
 #
+# Only a REVIEWER's thread becomes a record, and the account TYPE decides that,
+# not the spelling of the login: `claude` is a real human account as well as the
+# app's name. A thread that account opens is somebody's note, not a finding of
+# ours to score.
+#
 # WHY THE COMMIT MATTERS. A finding that was correct is indistinguishable from
 # one that was wrong once the author has fixed it: the contradiction you would
 # look for is exactly what the fix removed. Judging a past finding against the
@@ -65,7 +70,7 @@ while [ "$#" -gt 0 ]; do
     --out)  [ "$#" -ge 2 ] || die "--out requires a value";  out_dir="$2";   shift 2 ;;
     --threads-file) [ "$#" -ge 2 ] || die "--threads-file requires a value"; threads_file="$2"; shift 2 ;;
     --rest-file)    [ "$#" -ge 2 ] || die "--rest-file requires a value";    rest_file="$2";    shift 2 ;;
-    -h|--help) sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,49p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -253,10 +258,50 @@ commit_by_id = {c.get("id"): c.get("original_commit_id") for c in rest}
 
 BOTS = ("claude", "coderabbitai", "copilot", "sourcery-ai", "github-actions")
 
+# How many threads had to be judged on their login alone. Reported, never
+# swallowed: see is_bot().
+typeless_threads = 0
 
-def is_bot(login):
-    low = (login or "").lower()
-    return any(low.startswith(b) for b in BOTS) or low.endswith("[bot]")
+
+def is_bot(author):
+    """Is this thread a REVIEWER's, given the author as GraphQL returns it?
+
+    The ACCOUNT TYPE decides, and the login only says which reviewer. This used
+    to be a login prefix on its own, and the account that breaks it is named in
+    the presence guard below: `claude` is a real human account —
+    `gh api users/claude` returns type `User`, created 2009-05-07 — while the
+    Claude GitHub App posts under the same spelling with `__typename = Bot`.
+
+    So a thread that human opened was harvested as one of OUR findings, scored
+    in our column by report.sh, counted into our precision, and taken as
+    evidence our reviewer was present on that pull request — the exact spoofing
+    the presence guard was tightened to stop, moved one function across. The
+    same hole is open for every name in BOTS: `startswith("claude")` also
+    matches `claudette`.
+
+    Measured before the change, on 231 harvested documents: 196 findings logged
+    under `claude`, of which exactly one sits on a pull request the type-checked
+    presence guard says we were never on — and that one reads as our reviewer's
+    own output, from before the sticky summary existed. Zero live cases, and a
+    trap by construction on the number the ledger exists to answer.
+
+    The type is PREFERRED, not required. A response that carries no `__typename`
+    falls back to the login and is counted for the warning at the end, because
+    the two strict readings are both worse: dropping the thread deletes
+    measurement data from both sides of the page (this script rewrites the whole
+    document, so a harvest that read no types would empty the ledger), and
+    keeping it quietly reopens the hole. The query selects `__typename` on every
+    author, so the fallback is a bound, not a live path.
+    """
+    global typeless_threads
+    author = author or {}
+    low = (author.get("login") or "").lower()
+    named = any(low.startswith(b) for b in BOTS) or low.endswith("[bot]")
+    typename = author.get("__typename")
+    if not typename:
+        typeless_threads += 1
+        return named
+    return typename == "Bot" and named
 
 
 # The author's own words are the label. Guess a verdict for convenience, but
@@ -314,12 +359,14 @@ for thread in pr_node["reviewThreads"]["nodes"]:
         continue
     first = comments[0]
     author = (first.get("author") or {}).get("login") or "unknown"
-    if not is_bot(author):
+    # The whole author, not its login: the account type is what separates a
+    # reviewer from a person who happens to share its name. See is_bot().
+    if not is_bot(first.get("author")):
         continue  # human-initiated threads are not our findings to score
 
     human_replies = [
         c for c in comments[1:]
-        if not is_bot((c.get("author") or {}).get("login"))
+        if not is_bot(c.get("author"))
     ]
     verdict_text = human_replies[0]["body"] if human_replies else ""
 
@@ -544,6 +591,13 @@ for r in records:
     slot[r["verdict_guess"]] = slot.get(r["verdict_guess"], 0) + 1
 
 sys.stderr.write("harvest-feedback: %s#%s -> %s\n" % (repo, pr, out_path))
+if typeless_threads:
+    # Not a failure, and not silent either. Every one of these was attributed on
+    # its login alone, which is the reading that lets a human named `claude`
+    # into our column — see is_bot().
+    sys.stderr.write(
+        "  %-22s %d thread(s) carried no account type; attributed by login "
+        "alone\n" % ("unverified author", typeless_threads))
 if suppressed_by_us:
     sys.stderr.write(
         "  %-22s %d recorded, %d matched a thread harvested here, %d with a "

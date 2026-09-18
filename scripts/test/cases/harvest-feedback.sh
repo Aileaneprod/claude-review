@@ -527,3 +527,56 @@ print([f.get('suppressed_at_review', 'ABSENT') for f in d['findings']
 }
 assert_contains "first True then ABSENT" \
   "a record that is no longer written is no longer claimed" -- _supp_reharvest
+
+# --- whose thread it is decides whose finding it is --------------------------
+#
+# The presence guard above rests on `__typename == "Bot"` for a concrete reason
+# written beside it: `claude` is a REAL HUMAN ACCOUNT — `gh api users/claude`
+# returns type `User`, created 2009-05-07. `is_bot` was matching a login PREFIX
+# in the same file, so the account that cannot set the presence flag could still
+# open a thread that this script harvested as one of OUR findings, and that
+# report.sh then scored in our column, counted into our precision, and read as
+# evidence our reviewer was present on that pull request.
+#
+# Nothing on the harvested ledger says otherwise, and nothing can: `reviewer` is
+# a login, and the two accounts spell it identically. Measured on 231 documents,
+# 196 findings are logged under `claude` and exactly one of them sits on a pull
+# request the type-checked presence guard says we were never on — korbyx#14,
+# whose text is our reviewer's own English prose from 2026-08-11, before the
+# sticky summary existed. So: zero today, and a trap by construction, on the
+# same measurement the suppression record was written to keep honest.
+
+_who_dir() { printf '%s' "$TESTTMP/cr-test-whose-thread"; }
+
+# _who FIXTURE PR — the reviewer recorded for each path, or ABSENT.
+_who() {
+  rm -rf "$(_who_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr "$2" --out "$(_who_dir)" \
+    --threads-file "$FIXTURES/$1" \
+    --rest-file "$FIXTURES/rest-verdicts.json" 2>&1 >/dev/null
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+print(' '.join('%s=%s' % (f['path'], f['reviewer']) for f in d['findings'])
+      or '(no findings)')
+" "$(_who_dir)/test/repo/$2.json"
+}
+
+it "does not harvest a HUMAN named claude as our reviewer"
+_human_thread() { _who threads-thread-from-a-human-named-claude.json 300; }
+assert_not_contains "src/human.ts=claude" \
+  "a note a person left on a line is not a finding of ours to score" -- _human_thread
+assert_contains "src/ours.ts=claude" \
+  "and the bot account with the same login is still harvested" -- _human_thread
+
+it "keeps a finding whose author carries no account type, and says so"
+# The query asks for `__typename` on every author, so this is a bound rather
+# than a live shape. It still has to be decided, because the two obvious
+# readings are both bad: dropping the thread silently deletes measurement data
+# from both sides of the page, and keeping it silently reopens the hole above.
+# So the login heuristic stands in, and the run says how often it had to.
+_typeless() { _who threads-thread-without-a-type.json 301; }
+assert_contains "src/typeless.ts=coderabbitai" \
+  "a missing field does not silently delete a finding" -- _typeless
+assert_contains "1 thread(s) carried no account type" \
+  "and the fallback announces itself instead of passing for a check" -- _typeless
