@@ -116,6 +116,50 @@ faux positif est sur le point voisin"* scores as a rejection. Ask for the word;
 it costs the author nothing and it is the only thing that makes the scoreboard
 countable.
 
+### When the classifier is wrong, rule on it by hand
+
+The scoreboard is a classifier's reading of those replies, and a reply can be
+richer than any of its four words. The case that forced this: an author accepted
+a finding and downgraded it in the same sentence — *the observation stands, it is
+important rather than blocking, nothing breaks at runtime*. There was no way to
+record that. `verdict_human: rejected` would have been a rejection he never
+made, and saying nothing left the page publishing a blocking miss its own
+evidence said was not blocking. The reverse happens too: *"the observation is
+exact, the effect on the user is nil"* is scored `rejected`, which counts a
+correct finding against the precision of the reviewer that made it.
+
+So a verdict and a severity are ruled on separately. Add these four fields to
+the finding's record in the ledger — nothing else — and leave the classifier's
+own fields alone:
+
+```json
+"verdict_human":  "accepted",
+"severity_human": "important",
+"ruled_by":       "firas",
+"ruling":         "accepted on the substance and downgraded in the same reply"
+```
+
+Three things are worth knowing before you write one:
+
+* **Both `ruled_by` and `ruling` are required.** Without them the ruling is
+  refused and named on the page instead of applied. These are the only fields in
+  the ledger a person writes by hand, and they move the number that decides
+  whether a paid tool gets switched off; unattributed, one cannot be told apart
+  from a stray field written by a bug.
+* **Nothing moves in silence.** Where a ruling changes a published figure, the
+  page prints what the classifier alone produced beside it, and names every
+  ruling behind the difference.
+* **A ruling survives the next harvest.** `harvest-feedback.sh` rebuilds each
+  document from the API, and carries these four fields across — keyed on the
+  finding's text, so editing the finding drops the ruling rather than applying
+  it to something nobody read.
+
+`verdict_human` existed for months before any of this, sitting at the head of
+the priority chain in `report.sh` under the comment *"a human's own correction
+outranks the model"*. It appeared in **0** of the 153 ledger documents carrying
+findings. Nothing said how to write one, and nothing promised it would still be
+there in the morning.
+
 ### Keeping memory from becoming bloat
 
 Every line is read on every review, so it costs quota and competes for attention

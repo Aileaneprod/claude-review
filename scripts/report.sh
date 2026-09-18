@@ -61,6 +61,37 @@
 #     recall are not repaired in the same place. `to adjudicate` is counted in
 #     neither direction and printed in full — see the overlap note on the page.
 #
+# A HUMAN'S RULING, AND HOW TO WRITE ONE.
+#
+#   Every number on this page is a classifier's reading of what the author
+#   wrote. Where a human has read the thread and disagrees, four fields on that
+#   finding's record in the ledger say so:
+#
+#     "verdict_human":  accepted | partial | rejected | acknowledged | no_reply
+#     "severity_human": blocking | important | nit | preexisting
+#     "ruled_by":       who is ruling
+#     "ruling":         why, in their own words
+#
+#   `verdict_human` outranks the classifier's verdict; `severity_human` outranks
+#   the severity read off the finding's own text. They are INDEPENDENT, and that
+#   is the whole reason there are two: the case that forced this was a finding
+#   the author ACCEPTED and downgraded in the same reply — important rather than
+#   blocking, nothing breaks at runtime. A taxonomy carrying only a verdict can
+#   record that as `rejected`, which is a rejection the author never made, or as
+#   nothing at all, which leaves the criterion counting a blocking miss the
+#   author said was not blocking.
+#
+#   Both fields are IGNORED unless `ruled_by` and `ruling` are both filled in,
+#   and a ruling that is ignored is NAMED on the page rather than dropped. An
+#   override that moves the one number deciding whether a paid tool is switched
+#   off, carrying nobody's name and no reason, is not evidence — and it cannot
+#   be told apart from a stray field written by a bug. For the same reason the
+#   page prints what the classifier alone produced beside every number a ruling
+#   moved: a hand-written ruling may move the headline, never in silence.
+#
+#   harvest-feedback.sh carries all four fields across a re-harvest, so a ruling
+#   written by hand survives the next scheduled run that rewrites the document.
+#
 # Requires: python3.
 
 set -euo pipefail
@@ -86,7 +117,7 @@ while [ "$#" -gt 0 ]; do
     --since-note) [ "$#" -ge 2 ] || die "--since-note requires a value"; since_note="$2"; shift 2 ;;
     --gold-agreement) [ "$#" -ge 2 ] || die "--gold-agreement requires a value"; gold_agreement="$2"; gold_agreement_given=1; shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
-    -h|--help) sed -n '2,64p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,95p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -304,18 +335,90 @@ def severity(text):
     return "unlabelled", "none"
 
 
-def verdict_of(finding):
-    # A human's own correction outranks the model, which outranks keywords.
-    #
-    # Worth knowing while reading this page: `verdict_human` appears in 0 of the
-    # 153 ledger documents that carry findings, so the top of this list has
-    # never once fired. The override is available and unused, not disabled —
-    # and out of scope here, which is why this is a comment and not a change.
-    for key in ("verdict_human", "verdict_llm", "verdict_keyword", "verdict_guess"):
+def classifier_verdict(finding):
+    """What the machinery read off the author's reply: the model, then keywords
+    over the whole reply, then the first-word guess harvest-feedback.sh makes.
+
+    `verdict_human` used to head this chain, under the comment "a human's own
+    correction outranks the model". Measured on the ledger it appeared in 0 of
+    the 153 documents carrying findings: designed, honoured by this reader, and
+    never once written. Nothing said how to write one, and nothing promised a
+    hand-written field would survive the next harvest — so the documented
+    priority was in practice `verdict_llm > verdict_keyword > verdict_guess`,
+    and the model was never outranked by anybody.
+
+    It is a RULING now, read by ruling_of() below, and it is off this chain
+    because a ruling is admitted on different evidence: it has to carry a name
+    and a reason. A chain lookup cannot express that.
+    """
+    for key in ("verdict_llm", "verdict_keyword", "verdict_guess"):
         value = finding.get(key)
         if value:
             return value
     return "unknown"
+
+
+# The vocabulary each ruling field is allowed. Anything else is refused and
+# named, never coerced: a `severity_human` of "orange" or "🟠" that silently did
+# nothing would reproduce, by hand, the exact defect `verdict_human` had.
+#
+# `unknown` is deliberately not a verdict a human may write. The classifier says
+# `unknown` when it cannot read the reply; a human who cannot tell either has
+# not ruled, and should leave the fields out.
+VERDICT_WORDS = ("accepted", "partial", "rejected", "acknowledged", "no_reply")
+SEVERITY_WORDS = tuple(label for _emoji, label in SEVERITIES)
+
+# WHO and WHY, or it does not count. Both, and both non-empty.
+ATTRIBUTION = ("ruled_by", "ruling")
+
+
+def _written(finding, field):
+    value = finding.get(field)
+    return value.strip() if isinstance(value, str) and value.strip() else ""
+
+
+def ruling_of(finding):
+    """(verdict or None, severity or None, [refusal, ...]).
+
+    A human's ruling on one finding. Either field may be set, or both, or
+    neither — they are independent because the author's own replies are: the
+    finding that forced this concept was accepted on its substance and
+    downgraded on its severity in the same sentence.
+
+    Refused rather than applied when the ruling carries no `ruled_by` and
+    `ruling`. The page this feeds decides whether a paid review tool is
+    switched off, and these two fields are the only ones on it that a human
+    writes by hand into a document every other field of which is machine-
+    written. An unattributed one cannot be told from a bug in whatever wrote it,
+    and it can move the headline. The refusal is returned rather than swallowed
+    so the page can print it: a ruling that quietly does nothing is the failure
+    `verdict_human` already had, and repeating it silently would be worse than
+    having no override at all.
+    """
+    claimed = [(field, _written(finding, field), words)
+               for field, words in (("verdict_human", VERDICT_WORDS),
+                                    ("severity_human", SEVERITY_WORDS))]
+    claimed = [c for c in claimed if c[1]]
+    if not claimed:
+        return None, None, []
+
+    missing = [field for field in ATTRIBUTION if not _written(finding, field)]
+    if missing:
+        return None, None, ["%s written without %s"
+                            % (" and ".join("`%s`" % c[0] for c in claimed),
+                               " or ".join("`%s`" % f for f in missing))]
+
+    verdict = label = None
+    refusals = []
+    for field, word, words in claimed:
+        if word not in words:
+            refusals.append("`%s: %s` is not one of %s"
+                            % (field, word, ", ".join(words)))
+        elif field == "verdict_human":
+            verdict = word
+        else:
+            label = word
+    return verdict, label, refusals
 
 
 def tag_of(finding):
@@ -362,7 +465,7 @@ for root, _dirs, files in os.walk(ledger_dir):
             continue
         prs[(doc.get("repo"), number)] = doc
 
-rows, totals = [], {}
+rows, totals, unruled = [], {}, {}
 for key in ("ours", "theirs"):
     totals[key] = {v: 0 for v in ("accepted", "partial", "rejected",
                                   "acknowledged", "no_reply", "unknown")}
@@ -372,6 +475,20 @@ for key in ("ours", "theirs"):
     # assigned and a label the reviewer wrote are different evidence, and the
     # page that decides has to be able to say which it is counting.
     totals[key]["header_label"] = 0
+    # And how many rest on a human's ruling rather than on any reading of the
+    # text at all. Same rule, same reason: a number a person decided and a
+    # number a classifier decided are different evidence.
+    totals[key]["ruled_verdict"] = 0
+    totals[key]["ruled_severity"] = 0
+    # The same tally with every ruling ignored — what this page would say if no
+    # human had touched it. It exists so the page can print both: an override
+    # nobody can see is the same defect as a misreading nobody can see, and the
+    # criterion here is the number that ends a contract.
+    unruled[key] = dict(totals[key])
+
+# Every honoured ruling, and every one refused, so both can be printed by name.
+rulings = []
+refused = []
 
 # A confirmed blocking finding of theirs lands in exactly one of these.
 missed_absent = []      # our reviewer never ran
@@ -383,6 +500,11 @@ adjudicate = []         # we filed in that file; nobody has compared the two
 # rule worth having is not in the ledger — see the bucketing below. Every
 # candidate goes to `adjudicate` instead, which is why the criterion is a floor
 # and the page says so.
+#
+# The same criterion with every human ruling ignored. The page prints the two
+# side by side, so a ruling can move the number that ends a contract and cannot
+# move it without the reader seeing where it came from.
+criterion_unruled = 0
 both_reviewed = 0
 
 for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or 0)):
@@ -409,6 +531,9 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
     # absent. Re-harvesting upgrades it; nothing regresses in the meantime.
     present = {"ours": bool(doc.get("reviewed_by_ours")), "theirs": False}
     pr_missed = []
+    # The same list with every ruling ignored, so the counterfactual the page
+    # prints beside the criterion is computed rather than asserted.
+    pr_missed_unruled = []
     ours_here = []
     for finding in doc["findings"]:
         which = side(finding)
@@ -417,17 +542,47 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
         present[which] = True
         if which == "ours":
             ours_here.append(finding)
-        verdict = verdict_of(finding)
+
+        ruled_verdict, ruled_label, refusals = ruling_of(finding)
+        for problem in refusals:
+            refused.append((repo, number, finding.get("path"),
+                            tag_of(finding), problem))
+
+        base_verdict = classifier_verdict(finding)
+        base_label, base_source = severity(finding.get("finding"))
+        verdict = ruled_verdict or base_verdict
+        label = ruled_label or base_label
+
         counts[which][verdict] = counts[which].get(verdict, 0) + 1
         if verdict in totals[which]:
             totals[which][verdict] += 1
-        label, label_source = severity(finding.get("finding"))
-        if label_source == "header":
+        if base_verdict in unruled[which]:
+            unruled[which][base_verdict] += 1
+        # Counted against the label actually in use: where a human ruled, the
+        # label is not the tool's header any more, and a caveat about the
+        # header would be describing a number this page no longer prints.
+        if ruled_label is None and base_source == "header":
             totals[which]["header_label"] += 1
+        if base_source == "header":
+            unruled[which]["header_label"] += 1
+        if ruled_verdict:
+            totals[which]["ruled_verdict"] += 1
+        if ruled_label:
+            totals[which]["ruled_severity"] += 1
+        if ruled_verdict or ruled_label:
+            rulings.append((repo, number, finding.get("path"), tag_of(finding),
+                            base_verdict, ruled_verdict, base_label, ruled_label,
+                            _written(finding, "ruled_by"),
+                            _written(finding, "ruling")))
+
         if label == "blocking" and verdict in ("accepted", "partial"):
             totals[which]["blocking_accepted"] += 1
             if which == "theirs":
                 pr_missed.append(finding)
+        if base_label == "blocking" and base_verdict in ("accepted", "partial"):
+            unruled[which]["blocking_accepted"] += 1
+            if which == "theirs":
+                pr_missed_unruled.append(finding)
 
     if present["ours"] and present["theirs"]:
         both_reviewed += 1
@@ -470,6 +625,15 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
         else:
             missed_silent.append(where)
 
+    # The same arithmetic with the rulings taken out: absent and present-silent
+    # count, `adjudicate` does not. Written as one expression rather than a
+    # second copy of the block above so the two cannot drift apart — a
+    # counterfactual that stops matching the real thing is a lie with a number
+    # on it.
+    criterion_unruled += sum(
+        1 for finding in pr_missed_unruled
+        if not present["ours"] or finding.get("path") not in ours_paths)
+
     rows.append((repo, number, doc.get("title") or "", counts, present))
 
 # The criterion: every confirmed blocking finding of theirs that we are known
@@ -492,6 +656,8 @@ w = out.append
 
 ours_p, ours_judged = precision(totals["ours"])
 theirs_p, theirs_judged = precision(totals["theirs"])
+ours_p_unruled, _unruled_judged = precision(unruled["ours"])
+theirs_p_unruled, _unruled_judged_theirs = precision(unruled["theirs"])
 
 # A bare pull request number is repo-blind, and the filter above compares only
 # `doc["pr"]` even though the line under it keys the result by (repo, number).
@@ -592,6 +758,13 @@ w("to have raised, spread over %d pull request(s): %d where our reviewer never"
   % (len(criterion_prs), len(missed_absent)))
 w("ran, and %d where it ran and filed nothing in that file."
   % len(missed_silent))
+if criterion_unruled != criterion:
+    w("")
+    w("**%d of that figure rests on a human's ruling, not on the classifier.**"
+      % abs(criterion_unruled - criterion))
+    w("The classifier alone reads %d. Every ruling behind the difference is named"
+      % criterion_unruled)
+    w("under \"Human rulings\" below, with who wrote it and why.")
 if adjudicate:
     w("")
     w("It is a FLOOR, not a total: %d further finding(s) of theirs sit beside one of"
@@ -599,6 +772,88 @@ if adjudicate:
     w("ours in the same file, and whether those are the same defect is a question")
     w("this page refuses to answer by guessing. They are listed below, by name.")
 w("")
+
+w("## Human rulings")
+w("")
+w("Every number on this page is a classifier's reading of what the author")
+w("wrote — the model, then keywords over the reply, then a first-word guess.")
+w("A human who has read the thread can rule on a finding by hand, and %d of"
+  % len(rulings))
+w("the findings in this window carry such a ruling.")
+w("")
+if rulings:
+    # The whole point of the section. A ruling is allowed to move a published
+    # number; it is not allowed to move one invisibly, so the number the
+    # classifier alone produces is printed beside the number a human's judgement
+    # produces, on the same page, and every ruling behind the difference is
+    # named underneath with who wrote it and why.
+    w("| | classifier alone | after the rulings below |")
+    w("|---|---|---|")
+    w("| Blocking findings of theirs we did not raise | %d | %d |"
+      % (criterion_unruled, criterion))
+    w("| Our precision on judged findings | %s | %s |"
+      % (pct(ours_p_unruled), pct(ours_p)))
+    w("| %s's precision on judged findings | %s | %s |"
+      % (theirs_name, pct(theirs_p_unruled), pct(theirs_p)))
+    w("| blocking and author-confirmed, %s | %d | %d |"
+      % (theirs_name, unruled["theirs"]["blocking_accepted"],
+         totals["theirs"]["blocking_accepted"]))
+    w("")
+    w("Where the two columns differ, a person decided it and is named below.")
+    w("Where they agree, the ruling confirmed what the classifier already said.")
+    w("")
+    for (repo, number, path, tag, base_verdict, ruled_verdict,
+         base_label, ruled_label, ruled_by, note) in rulings:
+        moved = []
+        if ruled_verdict:
+            moved.append("verdict %s -> **%s**" % (base_verdict, ruled_verdict))
+        if ruled_label:
+            moved.append("severity %s -> **%s**" % (base_label, ruled_label))
+        w("- %s#%s `%s` %s — %s — %s: %s"
+          % (repo, number, path, tag, "; ".join(moved), ruled_by,
+             (note or "").replace("\n", " ")))
+    w("")
+else:
+    w("_None in this window._ Every number above is the classifier's.")
+    w("")
+
+# Printed whether or not anybody has ruled yet, because the reader who needs it
+# is the one looking at a number they believe is wrong. `verdict_human` was
+# honoured by this script for months and written zero times; a mechanism nobody
+# can find is the same as no mechanism.
+w("To rule on a finding, add these four fields to its record in the ledger and")
+w("leave the classifier's own fields alone:")
+w("")
+w("```json")
+w('    "verdict_human":  "accepted" | "partial" | "rejected" | "acknowledged" | "no_reply",')
+w('    "severity_human": "blocking" | "important" | "nit" | "preexisting",')
+w('    "ruled_by":       "who is ruling",')
+w('    "ruling":         "why, in your own words"')
+w("```")
+w("")
+w("The verdict and the severity are independent, and that is why there are two.")
+w("A finding the author accepted and downgraded in the same reply is")
+w('`verdict_human: "accepted"` with `severity_human: "important"`. Writing')
+w('`verdict_human: "rejected"` instead would record a rejection the author never')
+w("made, and writing nothing leaves the criterion above counting a blocking miss")
+w("the author themselves said was not blocking.")
+w("")
+w("A ruling with no `ruled_by` and `ruling` is refused rather than applied, and")
+w("named below. harvest-feedback.sh carries all four fields across a re-harvest,")
+w("so a ruling written by hand survives the next run that rewrites the document.")
+w("")
+
+if refused:
+    w("### rulings this page refused")
+    w("")
+    w("Each of these findings carries a ruling field this page did NOT apply; the")
+    w("classifier's reading stands for every one of them. They are listed rather")
+    w("than dropped, because a ruling that quietly does nothing is the defect this")
+    w("section exists to close.")
+    w("")
+    for repo, number, path, tag, problem in refused:
+        w("- %s#%s `%s` %s — %s" % (repo, number, path, tag, problem))
+    w("")
 
 w("## Both reviewers, side by side")
 w("")
@@ -614,6 +869,10 @@ w("| blocking, author-confirmed | %d | %d |"
   % (totals["ours"]["blocking_accepted"], totals["theirs"]["blocking_accepted"]))
 w("| severity read off the header, not the prose | %d | %d |"
   % (totals["ours"]["header_label"], totals["theirs"]["header_label"]))
+w("| verdict set by a human ruling, not the classifier | %d | %d |"
+  % (totals["ours"]["ruled_verdict"], totals["theirs"]["ruled_verdict"]))
+w("| severity set by a human ruling, not the text | %d | %d |"
+  % (totals["ours"]["ruled_severity"], totals["theirs"]["ruled_severity"]))
 w("")
 w("Precision counts `accepted` plus half credit for `partial`, over findings the")
 w("author actually judged. `no reply` and `acknowledged` are excluded, not")
@@ -624,6 +883,10 @@ w("finding's own prose, with its collapsed `<details>` appendices removed; where
 w("the prose carries no severity at all, the label falls back to the tool's")
 w("header line. Those labels are the tool's, not the reviewer's, and the count")
 w("says how many of them there are rather than blending them in unannounced.")
+w("")
+w("The two rows under it say how much of this table is a person's judgement")
+w("rather than a classifier's. Both are zero on a page nobody has ruled on, and")
+w("every non-zero one is named in full under \"Human rulings\" above.")
 w("")
 
 w("## Blocking findings of theirs we did not raise")
@@ -704,6 +967,10 @@ for repo, number, title, counts, present in rows:
     w("| #%s | %s | %s | %s | %s |"
       % (number, (title or "")[:52].replace("|", "\\|"), cell("ours"), cell("theirs"),
          "yes" if (present["ours"] and present["theirs"]) else ""))
+
+for _repo, _number, _path, _tag, _problem in refused:
+    sys.stderr.write("report: ruling not applied on %s#%s %s: %s\n"
+                     % (_repo, _number, _path, _problem))
 
 text = "\n".join(out) + "\n"
 if out_file:
