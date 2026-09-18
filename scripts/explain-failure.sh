@@ -4,11 +4,25 @@
 #
 # Usage:
 #   explain-failure.sh --execution-file FILE [--count-out FILE]
+#                      [--status-out FILE]
 #
 #   --execution-file FILE  The action's execution log: a JSON array of SDK
 #                          messages, written even when the run crashes.
 #   --count-out FILE       Write the number of inline findings this run posted
 #                          to FILE. Default: none.
+#   --status-out FILE      Write the HTTP status the API failed with — 429, 401,
+#                          5xx — to FILE, and leave FILE empty when the run did
+#                          not end on one. Default: none.
+#
+# WHY --status-out EXISTS. The status was already recovered and printed below,
+# and printed only to the run log, which nobody opens. Aileaneprod/korbyx run
+# 35266745831 ended on `api_error_status 429`, `terminal_reason api_error` — the
+# subscription's usage limit — while the comment the author actually read said
+# "The reviewer did not complete", the same sentence a timeout or an expired
+# token produces. Four pull requests (korbyx #228-#231) sat unreviewed overnight
+# because nobody learned the quota was gone. review.yml turns this file into the
+# sentence on the pull request, so the cause has to leave here in a form a shell
+# can branch on, not just in prose.
 #
 # Prints a diagnostic to stdout and exits 0 even when the file is missing or
 # unreadable. Nothing here may fail the job: it runs on the path where the
@@ -29,6 +43,7 @@ set -euo pipefail
 
 execution_file=""
 count_out=""
+status_out=""
 
 die() {
   printf 'explain-failure: %s\n' "$1" >&2
@@ -39,10 +54,21 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --execution-file) [ "$#" -ge 2 ] || die "--execution-file requires a value"; execution_file="$2"; shift 2 ;;
     --count-out)      [ "$#" -ge 2 ] || die "--count-out requires a value";      count_out="$2";      shift 2 ;;
-    -h|--help)        sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --status-out)     [ "$#" -ge 2 ] || die "--status-out requires a value";     status_out="$2";     shift 2 ;;
+    -h|--help)        sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
+
+# The empty answer is on disk before anything can fail to put it there, the same
+# discipline review.yml uses for the verdict and the posted witness. Empty means
+# "cause unknown", which is the only safe default: it picks the wording that
+# blames nothing, rather than naming a token that may be perfectly fine. It
+# cannot be left to the python below, which does not run at all when the
+# execution file is missing.
+if [ -n "$status_out" ]; then
+  printf '' > "$status_out"
+fi
 
 # A missing execution file is an ordinary outcome — the run may have died before
 # the action wrote one. Record zero findings and say so.
@@ -52,16 +78,30 @@ if [ -z "$execution_file" ] || [ ! -f "$execution_file" ]; then
   exit 0
 fi
 
-python3 - "$execution_file" "$count_out" <<'PY'
+python3 - "$execution_file" "$count_out" "$status_out" <<'PY'
 import json
 import sys
 
-execution_path, count_path = sys.argv[1], sys.argv[2]
+execution_path, count_path, status_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
 
 def emit_count(value):
     if count_path:
         with open(count_path, "w", encoding="utf-8") as handle:
+            handle.write(str(value))
+
+
+def emit_status(value):
+    """The cause, in the one form review.yml can branch on.
+
+    Called only where a status actually exists, unlike emit_count: the caller
+    has already put the empty "cause unknown" answer on disk, so every path that
+    does not reach here leaves it empty, which is what it means. Writing a guess
+    would have the notice name a cause this run has no evidence for — the same
+    class of claim the notice exists to stop making.
+    """
+    if status_path:
+        with open(status_path, "w", encoding="utf-8") as handle:
             handle.write(str(value))
 
 
@@ -119,6 +159,15 @@ else:
         403: "The token is not authorised for this use.",
         429: "Rate limited or subscription quota exhausted.",
     }.get(status)
+    # The same field, out of the log and into the notice. Only a bare integer
+    # crosses: it is read back into a shell `case` in review.yml, and a
+    # diagnostic that runs on the failure path is the last place that should be
+    # handing a shell something it did not expect. `bool` is excluded because
+    # `isinstance(True, int)` is true in python and `api_error_status: true`
+    # would otherwise arrive as "True" — a cause nobody can act on.
+    if isinstance(status, int) and not isinstance(status, bool):
+        emit_status(status)
+
     if hint:
         print("  hint               %s" % hint)
     elif last.get("subtype") == "error_max_turns":

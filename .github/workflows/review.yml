@@ -720,14 +720,69 @@ jobs:
           # tools the reviewer was denied and how many findings it had already
           # posted before it stopped. explain-failure.sh does that reading; it
           # never fails the job.
+          #
+          # The empty cause is on disk before the script runs — the discipline
+          # the verdict and the posted witness already use. This call ends in
+          # `|| true`, so a failure inside it has to leave "cause unknown"
+          # behind, which selects the wording that blames nothing.
           echo "--- diagnostic ---"
-          .claude-review-tooling/scripts/explain-failure.sh             --execution-file "${EXECUTION_FILE:-}"             --count-out "$RUNNER_TEMP/posted-count" || true
+          : > "$RUNNER_TEMP/api-status"
+          .claude-review-tooling/scripts/explain-failure.sh \
+            --execution-file "${EXECUTION_FILE:-}" \
+            --count-out "$RUNNER_TEMP/posted-count" \
+            --status-out "$RUNNER_TEMP/api-status" || true
 
           posted=0
           if [ -f "$RUNNER_TEMP/posted-count" ]; then
             posted="$(cat "$RUNNER_TEMP/posted-count")"
           fi
           case "$posted" in ''|*[!0-9]*) posted=0 ;; esac
+
+          api_status=""
+          if [ -f "$RUNNER_TEMP/api-status" ]; then
+            api_status="$(cat "$RUNNER_TEMP/api-status")"
+          fi
+          # Anything that is not a bare HTTP status counts as no status at all.
+          # The value crossed a file out of a diagnostic reading a JSON document
+          # this workflow did not write, and it is about to be matched in a
+          # `case` and quoted into a comment on a public pull request. The
+          # script filters it too; neither side is the only thing that does.
+          case "$api_status" in ''|*[!0-9]*) api_status="" ;; esac
+
+          # WHY THE CAUSE IS HERE AT ALL. `reason` used to be composed from the
+          # verdict and the posted count alone, so every failure produced one
+          # sentence: "The reviewer did not complete." An exhausted
+          # subscription, an expired token, an Anthropic 5xx and a timeout all
+          # read as the tool being flaky, and nobody reports flaky upstream.
+          # Aileaneprod/korbyx run 35266745831 ended on api_error_status 429 —
+          # the subscription's usage limit — and korbyx #228-#231 then sat
+          # unreviewed overnight, because the one fact that explained them never
+          # left the run log.
+          #
+          # `cause` says what happened, `recourse` says what to do about it, and
+          # `cause_headline` is what the check run and the job summary lead
+          # with. All three stay empty when the status is unknown, which is the
+          # common case and leaves every word below exactly as it was.
+          cause=""
+          recourse=""
+          cause_headline=""
+          case "$api_status" in
+            429)
+              cause="the subscription behind the reviewer's credential has hit its usage limit, so Anthropic refused the request (HTTP 429)"
+              recourse="Nothing is lost: push again, or re-run this workflow, once the limit resets, and this code gets reviewed then."
+              cause_headline="AI review unavailable — the reviewer's usage limit is reached"
+              ;;
+            401|403)
+              cause="Anthropic rejected the reviewer's credential (HTTP $api_status), which means the \`CLAUDE_CODE_OAUTH_TOKEN\` secret this workflow authenticates with is expired or not authorised for this use"
+              recourse="A maintainer has to regenerate that token and update the secret; there is nothing to change on this pull request."
+              cause_headline="AI review unavailable — CLAUDE_CODE_OAUTH_TOKEN was rejected"
+              ;;
+            5[0-9][0-9])
+              cause="Anthropic's API returned a server error (HTTP $api_status)"
+              recourse="That is an outage on their side: nothing in this repository needs fixing. Re-run this workflow to try again."
+              cause_headline="AI review unavailable — Anthropic API outage"
+              ;;
+          esac
 
           # This step now answers "no summary was posted", which is not the same
           # as "the reviewer failed" — it also catches a review that finished
@@ -736,19 +791,46 @@ jobs:
           # Saying "the reviewer step did not complete" in that branch would be
           # a false statement, in the notice whose entire job is to stop this
           # workflow claiming things that are not so.
+          #
+          # The cause reaches the branches where the reviewer did NOT finish,
+          # and only those. A `completed` verdict comes from a result record
+          # that is not an error, which by construction carries no
+          # api_error_status — that author's problem is the missing summary, not
+          # the API, and inventing an API cause for them would be the same
+          # defect in the other direction. Where findings were posted the cause
+          # is appended, not substituted: "this push was not reviewed" is false
+          # with N findings already on the diff.
+          spoke_cause=false
           if [ "$VERDICT" = completed ]; then
             reason="The reviewer finished this push, but no summary could be recovered from it."
             headline="AI review: no summary for this push"
           elif [ "$posted" -gt 0 ]; then
-            reason="The reviewer stopped before finishing."
+            reason="The reviewer stopped before finishing${cause:+: $cause}."
             headline="AI review stopped early — $posted finding(s) were posted first"
+          elif [ -n "$cause" ]; then
+            reason="This push was not reviewed: $cause. $recourse"
+            headline="$cause_headline"
+            spoke_cause=true
           else
             reason="The reviewer did not complete."
             headline="AI review unavailable"
           fi
 
+          # The body extends whichever branch above ran, so it keys off what
+          # that chain DID — `spoke_cause` — and not off `cause`, which is also
+          # set in the cases the chain ignores. The first draft of this tested
+          # `-n "$cause"` here, and a run with a `completed` verdict and a
+          # status in the file then lost a sentence out of a branch this change
+          # is supposed to leave untouched. Same lesson as the `if:` on this
+          # step: two conditions derived from one signal agree only while that
+          # signal means what both of them assume.
           if [ "$posted" -gt 0 ]; then
             body="🤖 $reason It had already posted $posted inline finding(s) on this push; those comments are real and worth reading. What is missing is the summary, so any severity counts shown above are from an earlier run and are now out of date. This does not block merging."
+          elif [ "$spoke_cause" = true ]; then
+            # `reason` has already said the push was not reviewed and what
+            # happens next; the generic line below would only say the first half
+            # again, less precisely.
+            body="🤖 $reason This does not block merging."
           else
             body="🤖 $reason No summary was posted for this push. This does not block merging."
           fi

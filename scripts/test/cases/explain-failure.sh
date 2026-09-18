@@ -93,3 +93,42 @@ assert_status 0 "a string-valued message field does not crash the diagnostic" --
 assert_contains "findings posted    1" "the count is still reached and correct" -- _exec system-init-record.json
 assert_contains "Bash x1" "denials are still reported" -- _exec system-init-record.json
 assert_equal "1" "$(_count system-init-record.json)" "--count-out is written despite the init record"
+
+# --- the cause file the notice on the pull request is written from -----------
+#
+# `api_error_status` was recovered and printed here long before this option
+# existed, and printed only to the run log. Aileaneprod/korbyx run 35266745831
+# ended `api_error_status 429 / terminal_reason api_error` — the subscription's
+# usage limit — while the comment the author read said "The reviewer did not
+# complete", the sentence a timeout produces too. --status-out is how the cause
+# reaches review.yml, so what matters is not only that a status is written but
+# that NOTHING is written when there is no evidence for one: a stale value here
+# makes the notice blame a credential that is fine, on a run that timed out.
+#
+# Hence the seeded value in the helper. Every call starts with a wrong status on
+# disk and has to overwrite it; without the seed these cases pass against code
+# that never writes the file at all.
+
+it "writes the API error status to --status-out"
+_status() {
+  local out="$TESTTMP/api-status"
+  printf '429' > "$out"
+  "$SCRIPTS/explain-failure.sh" --execution-file "$FIXTURES/$1" --status-out "$out" >/dev/null 2>&1
+  cat "$out" 2>/dev/null || echo "(no status file written)"
+}
+assert_equal "429" "$(_status api-429-quota.json)" "a quota refusal is reported as 429"
+assert_equal "401" "$(_status auth-401.json)" "a rejected credential is reported as 401"
+
+it "writes no status when the run did not end on an API error"
+# error_max_turns, no api_error_status: the cause there is a turn budget, and
+# naming 429 would send a maintainer to check a quota that is not the problem.
+assert_equal "" "$(_status posted-two-succeeded.json)" "a run with no API error leaves the file empty"
+assert_equal "" "$(_status no-result-record.json)" "a run with no result record leaves the file empty"
+
+it "leaves the status empty when the execution file cannot be read"
+assert_equal "" "$(_status malformed.json)" "an unreadable file leaves the file empty"
+assert_equal "" "$(_status does-not-exist.json)" "a missing file leaves the file empty"
+assert_status 0 "--status-out does not make an unreadable file fail the job" -- \
+  "$SCRIPTS/explain-failure.sh" --execution-file "$FIXTURES/malformed.json" --status-out "$TESTTMP/api-status"
+assert_status 0 "--status-out does not make a missing file fail the job" -- \
+  "$SCRIPTS/explain-failure.sh" --execution-file "$FIXTURES/does-not-exist.json" --status-out "$TESTTMP/api-status"
