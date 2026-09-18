@@ -86,3 +86,14 @@ jobs:
           path: eval/.out/
           retention-days: 7
           if-no-files-found: ignore
+          # The output directory is HIDDEN — `.out` — and upload-artifact@v4
+          # skips hidden files unless told otherwise. So every run of this
+          # workflow uploaded an empty artifact and said so in one line nobody
+          # reads: "No files were found with the provided path: eval/.out/".
+          #
+          # The cost was not theoretical. The gate failed on 2026-08-05 with one
+          # decoy hit and stayed red for 44 days, because the responses that
+          # would have named the false positive were discarded by the step meant
+          # to keep them. `if-no-files-found: ignore` is right — a stub run can
+          # legitimately produce nothing — and it is also what kept this quiet.
+          include-hidden-files: true
