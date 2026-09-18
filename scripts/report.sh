@@ -52,6 +52,8 @@
 #
 #       absent          our reviewer never ran on that pull request
 #       present, silent it ran and filed nothing in that file
+#       suppressed      our own prompt told it not to raise that one
+#       suppressed, and our summary called it blocking anyway
 #       covered         we raised the same defect
 #       to adjudicate   we filed in that file and nobody has yet read the two
 #                       findings side by side
@@ -60,6 +62,36 @@
 #     its own: a review that never ran is a plumbing failure, and plumbing and
 #     recall are not repaired in the same place. `to adjudicate` is counted in
 #     neither direction and printed in full — see the overlap note on the page.
+#
+# WHAT WE TOLD THE REVIEWER NOT TO RAISE.
+#
+#   post-review.sh hands every review of ours a block listing the findings the
+#   other reviewer or a human filed first, with the instruction not to post an
+#   inline comment on any of them. So a blocking finding of theirs we "did not
+#   raise" may be one our own prompt forbade, and the criterion above was partly
+#   measuring that instruction — improving on its own as the other reviewer got
+#   faster at posting.
+#
+#   `pre` records each suppressed finding, `post` writes it into the sticky
+#   comment's ledger and harvest-feedback.sh reads it back as
+#   `suppressed_at_review` / `suppressed_concurred` / `suppressed_by`. This page
+#   splits the criterion's population three ways on it:
+#
+#     not suppressed          a recall miss, and the only bucket counted here
+#     suppressed, no statement unknown — counted in NEITHER direction
+#     suppressed, concurred   the reviewer checked it and called it blocking in
+#                             its own summary. Its own line, never added to our
+#                             column, and explicitly weak: the prompt had just
+#                             shown it the finding, so nothing observable can
+#                             tell an independent judgement from agreement.
+#
+#   A record is honoured only when its `by` names the reviewer being measured.
+#   The same block suppresses a HUMAN's thread, and a human is not that reviewer.
+#
+#   The record does not exist on a pull request reviewed before it shipped, and
+#   an absent record is not an empty one — so the page prints how much of the
+#   window it covers beside every count built on it. Without that line, every
+#   zero here reads as "we suppressed nothing" on the whole history.
 #
 # A HUMAN'S RULING, AND HOW TO WRITE ONE.
 #
@@ -117,7 +149,7 @@ while [ "$#" -gt 0 ]; do
     --since-note) [ "$#" -ge 2 ] || die "--since-note requires a value"; since_note="$2"; shift 2 ;;
     --gold-agreement) [ "$#" -ge 2 ] || die "--gold-agreement requires a value"; gold_agreement="$2"; gold_agreement_given=1; shift 2 ;;
     --out)    [ "$#" -ge 2 ] || die "--out requires a value";    out_file="$2";   shift 2 ;;
-    -h|--help) sed -n '2,95p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,127p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -446,6 +478,34 @@ def side(finding):
     return None
 
 
+def suppression_of(finding):
+    """(suppressed, concurred) — what our own prompt did to this finding.
+
+    Written by harvest-feedback.sh out of the record post-review.sh embeds in
+    our sticky comment: this finding was in the list the reviewer was told not
+    to file an inline comment on, and `concurred` is the reviewer having called
+    it blocking in its own summary anyway.
+
+    Honoured only when `by` names the reviewer under measurement. The same block
+    suppresses a HUMAN's thread — that is why post-review.sh records `by` at all
+    — and a human filing something first is not the tool we are comparing
+    ourselves against. Without this test, a record left by a colleague would
+    retire a finding of theirs from the criterion.
+
+    `concurred` cannot be read as recall. The prompt had just shown the reviewer
+    the finding, so agreement and independent judgement are indistinguishable to
+    anything observable; and the absence of the flag is no opinion rather than a
+    miss. Both directions are wrong to infer, which is why this returns two
+    facts and the page prints three buckets instead of two.
+    """
+    if not finding.get("suppressed_at_review"):
+        return False, False
+    by = (finding.get("suppressed_by") or "").lower()
+    if not by.startswith(theirs_name):
+        return False, False
+    return True, bool(finding.get("suppressed_concurred"))
+
+
 prs = {}
 repos_seen = set()
 for root, _dirs, files in os.walk(ledger_dir):
@@ -493,6 +553,9 @@ refused = []
 # A confirmed blocking finding of theirs lands in exactly one of these.
 missed_absent = []      # our reviewer never ran
 missed_silent = []      # it ran and filed nothing in that file
+suppressed_quiet = []   # our own prompt forbade it, and we said nothing about it
+suppressed_agreed = []  # our own prompt forbade it, and our summary called it
+                        # blocking anyway — weak evidence, see suppression_of()
 adjudicate = []         # we filed in that file; nobody has compared the two
 #
 # There is no `covered` list. Deciding that we raised the same defect takes a
@@ -506,6 +569,28 @@ adjudicate = []         # we filed in that file; nobody has compared the two
 # move it without the reader seeing where it came from.
 criterion_unruled = 0
 both_reviewed = 0
+
+# How much of the window the suppression record even covers, and how big the
+# instruction is where it does. Counted over ALL the record's entries, not only
+# the ones a harvested finding matched: an entry naming a thread since deleted
+# is the only evidence left that the reviewer was told to leave it alone.
+#
+# `docs_recorded` is the number that keeps the rest honest. Every count built on
+# this record is zero on a pull request reviewed before post-review.sh began
+# writing it, and a page that prints those zeros without saying how few pull
+# requests carry a record at all reports "we suppressed nothing" for the whole
+# history.
+docs_recorded = 0
+supp_entries = 0
+supp_entry_prs = 0
+supp_orphans = 0
+# Every author-confirmed blocking finding of theirs that was in a suppression
+# list, whatever bucket it lands in — including the ones sitting beside a
+# finding of ours, which never reach the criterion at all. This is the pair the
+# head-to-head row needed: that row counts all of them, so the suppression
+# distorts it whether or not the criterion ever saw them.
+supp_blocking = 0
+supp_blocking_agreed = 0
 
 for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", kv[0][1] or 0)):
     counts = {"ours": {}, "theirs": {}}
@@ -579,6 +664,13 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
             totals[which]["blocking_accepted"] += 1
             if which == "theirs":
                 pr_missed.append(finding)
+                # Counted here rather than in the bucketing below, because the
+                # head-to-head row counts every one of these — including the
+                # ones that go to `adjudicate` and never reach the criterion.
+                was_suppressed, concurred = suppression_of(finding)
+                if was_suppressed:
+                    supp_blocking += 1
+                    supp_blocking_agreed += 1 if concurred else 0
         if base_label == "blocking" and base_verdict in ("accepted", "partial"):
             unruled[which]["blocking_accepted"] += 1
             if which == "theirs":
@@ -611,10 +703,19 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
     # sufficient: no finding of ours in that file is scored as not covered, and
     # a finding of ours in that file is sent to a human, listed by name, and
     # counted in neither direction.
+    #
+    # And the suppression, which is the same kind of correction one step
+    # further: a finding our own prompt told the reviewer not to raise is not
+    # evidence about its recall in either direction. It is taken out of the
+    # criterion and kept on the page, split on whether our summary said anything
+    # about it — see suppression_of() for why that statement is weak evidence
+    # and never a catch. A finding of ours in the same file still wins: there a
+    # human has two findings to compare, which is more than either flag knows.
     ours_paths = set(f.get("path") for f in ours_here if f.get("path"))
     for finding in pr_missed:
         where = (repo, number, finding.get("path"), finding.get("line"),
                  tag_of(finding))
+        was_suppressed, concurred = suppression_of(finding)
         if not present["ours"]:
             missed_absent.append(where)
         elif finding.get("path") in ours_paths:
@@ -622,24 +723,52 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
                 sorted(set(f.get("line") for f in ours_here
                            if f.get("path") == finding.get("path")),
                        key=lambda value: (value is None, value or 0)),))
+        elif was_suppressed and concurred:
+            suppressed_agreed.append(where)
+        elif was_suppressed:
+            suppressed_quiet.append(where)
         else:
             missed_silent.append(where)
 
     # The same arithmetic with the rulings taken out: absent and present-silent
-    # count, `adjudicate` does not. Written as one expression rather than a
-    # second copy of the block above so the two cannot drift apart — a
-    # counterfactual that stops matching the real thing is a lie with a number
-    # on it.
+    # count, `adjudicate` and the two suppressed buckets do not. Written as one
+    # expression rather than a second copy of the block above so the two cannot
+    # drift apart — a counterfactual that stops matching the real thing is a lie
+    # with a number on it. The suppression is not a ruling, so it applies to
+    # both columns: it says what the reviewer was ALLOWED to do, which no
+    # reading of the author's reply can change.
     criterion_unruled += sum(
         1 for finding in pr_missed_unruled
-        if not present["ours"] or finding.get("path") not in ours_paths)
+        if not present["ours"] or (finding.get("path") not in ours_paths
+                                   and not suppression_of(finding)[0]))
+
+    # What the record covers on this pull request, whatever the severities in
+    # it. `suppressed_by_us` absent means the review predates the record; an
+    # empty list means that run suppressed nothing, and the two must not print
+    # as the same thing.
+    record = doc.get("suppressed_by_us")
+    if isinstance(record, list):
+        docs_recorded += 1
+        mine = [item for item in record
+                if isinstance(item, dict)
+                and (item.get("by") or "").lower().startswith(theirs_name)]
+        supp_entries += len(mine)
+        supp_entry_prs += 1 if mine else 0
+        # An entry no harvested finding carries the flag for: the thread has
+        # been deleted, force-pushed away, or was never one of theirs to begin
+        # with. The instruction still happened.
+        flagged = sum(1 for f in doc["findings"] if f.get("suppressed_at_review"))
+        supp_orphans += max(0, len(mine) - flagged)
 
     rows.append((repo, number, doc.get("title") or "", counts, present))
 
 # The criterion: every confirmed blocking finding of theirs that we are known
 # not to have raised. Absent and present-silent both count — one is our
 # plumbing and one is our recall, and the question "did we catch it" does not
-# care which failed. `covered` and `adjudicate` do not count.
+# care which failed. `covered`, `adjudicate` and the two suppressed buckets do
+# not count: a finding our own prompt forbade says nothing about recall, and
+# counting it makes this number improve as the other reviewer gets faster at
+# posting first.
 criterion = len(missed_absent) + len(missed_silent)
 criterion_prs = sorted(set((r, n) for r, n, _p, _l, _t in missed_absent + missed_silent))
 
@@ -771,6 +900,14 @@ if adjudicate:
       % len(adjudicate))
     w("ours in the same file, and whether those are the same defect is a question")
     w("this page refuses to answer by guessing. They are listed below, by name.")
+if suppressed_quiet or suppressed_agreed:
+    w("")
+    w("**%d further finding(s) are out of that number because OUR OWN PROMPT told"
+      % (len(suppressed_quiet) + len(suppressed_agreed)))
+    w("the reviewer not to raise them.** Counting those would measure an")
+    w("instruction we wrote, and would improve on its own as %s gets" % theirs_name)
+    w("faster at posting first. They are under \"What our own prompt told the")
+    w("reviewer not to raise\" below, with what that record can and cannot say.")
 w("")
 
 w("## Human rulings")
@@ -867,6 +1004,19 @@ w("| **precision** | **%s** | **%s** |" % (pct(ours_p), pct(theirs_p)))
 w("| judged (the denominator) | %d | %d |" % (ours_judged, theirs_judged))
 w("| blocking, author-confirmed | %d | %d |"
   % (totals["ours"]["blocking_accepted"], totals["theirs"]["blocking_accepted"]))
+# The row above is the one the suppression really distorts, and it is not the
+# miss list. The criterion only ever sees a finding of theirs we filed nothing
+# near; this row counts EVERY confirmed blocking finding of theirs, most of them
+# on pull requests we reviewed — where our own prompt had handed the reviewer
+# the finding and told it not to file. Read without these two rows, the gap
+# between the columns reads as recall.
+#
+# `—` on our side, and not 0: the block only ever suppresses a thread we did not
+# open, so the question does not arise for our column. A 0 would suggest it was
+# asked and answered.
+w("| of those, suppressed by our own prompt | — | %d |" % supp_blocking)
+w("| of those, our summary called blocking anyway | — | %d |"
+  % supp_blocking_agreed)
 w("| severity read off the header, not the prose | %d | %d |"
   % (totals["ours"]["header_label"], totals["theirs"]["header_label"]))
 w("| verdict set by a human ruling, not the classifier | %d | %d |"
@@ -878,7 +1028,17 @@ w("Precision counts `accepted` plus half credit for `partial`, over findings the
 w("author actually judged. `no reply` and `acknowledged` are excluded, not")
 w("counted as wrong — a finding nobody ruled on is not one anybody accepted.")
 w("")
-w("The last row is a caveat on the one above it. Severity is read from the")
+w("The two rows under `blocking, author-confirmed` say how much of %s's" % theirs_name)
+w("column our own prompt had already handed the reviewer with an instruction not")
+w("to raise it. Neither is subtracted, and neither is added to our side.")
+w("**It cannot tell an independent judgement from agreement with a finding the")
+w("prompt had just shown the reviewer**, and no statement at all is no opinion rather")
+w("than a miss — so the only honest thing to do with the pair is print it where")
+w("the gap between the two columns is read. What it covers, and what it cannot")
+w("cover, is under \"What our own prompt told the reviewer not to raise\" below.")
+w("")
+w("`severity read off the header, not the prose` is a caveat on the same row.")
+w("Severity is read from the")
 w("finding's own prose, with its collapsed `<details>` appendices removed; where")
 w("the prose carries no severity at all, the label falls back to the tool's")
 w("header line. Those labels are the tool's, not the reviewer's, and the count")
@@ -901,6 +1061,10 @@ w("| absent — our reviewer never ran on that pull request | %d | yes |"
   % len(missed_absent))
 w("| present, silent — it ran and filed nothing in that file | %d | yes |"
   % len(missed_silent))
+w("| suppressed — our prompt told the reviewer not to raise it | %d | no |"
+  % len(suppressed_quiet))
+w("| suppressed, and our summary called it blocking anyway | %d | no |"
+  % len(suppressed_agreed))
 w("| covered — we raised the same defect | — | no |")
 w("| to adjudicate by hand | %d | not yet |" % len(adjudicate))
 w("")
@@ -909,6 +1073,15 @@ w("never ran is a plumbing failure, a review that ran and saw nothing is a recal
 w("failure, and they are not repaired in the same place. This row pair used to be")
 w("one row holding `absent` alone, which measured whether our reviewer was")
 w("available rather than whether it saw anything.")
+w("")
+w("The two `suppressed` rows are counted in neither direction. Our own prompt had")
+w("listed those findings to the reviewer with an instruction not to file on them,")
+w("so their absence from our side is compliance, not recall. The second row is")
+w("the reviewer having checked one itself and called it blocking in its summary:")
+w("the best evidence available that we would have caught it, and weak evidence,")
+w("because the prompt had just shown it the finding. **It cannot tell an")
+w("independent judgement from agreement**, so no finding on it is moved into our")
+w("column anywhere on this page.")
 w("")
 
 if missed_absent:
@@ -927,6 +1100,26 @@ if missed_silent:
 
 if not missed_absent and not missed_silent:
     w("_None in this window._")
+    w("")
+
+if suppressed_quiet:
+    w("### suppressed — our prompt told the reviewer not to raise it")
+    w("")
+    w("Our summary says nothing about these, which is no opinion and not a miss.")
+    w("")
+    for repo, number, path, line, tag in suppressed_quiet:
+        w("- %s#%s `%s:%s` %s" % (repo, number, path, line, tag))
+    w("")
+
+if suppressed_agreed:
+    w("### suppressed, and our summary called it blocking anyway")
+    w("")
+    w("The reviewer was told not to file on these and checked them against the")
+    w("code anyway, calling each one blocking in its own summary. That is not a")
+    w("catch: the prompt had just shown it the finding.")
+    w("")
+    for repo, number, path, line, tag in suppressed_agreed:
+        w("- %s#%s `%s:%s` %s" % (repo, number, path, line, tag))
     w("")
 
 # The fourth bucket, and why it is a bucket rather than a rule. Guessing here
@@ -953,6 +1146,49 @@ if adjudicate:
           % (repo, number, path, line, tag,
              ", ".join(str(l) if l is not None else "—" for l in ours_lines)))
     w("")
+
+# The section the buckets above point at. It exists because the instruction is
+# invisible everywhere else: nothing on a pull request says "this reviewer was
+# handed that finding and told to leave it alone", and the numbers on this page
+# were built as if nobody had been told anything.
+w("## What our own prompt told the reviewer not to raise")
+w("")
+w("Every review of ours is handed a block listing the findings %s or a" % theirs_name)
+w("human filed first, with the instruction not to post an inline comment on any")
+w("of them. post-review.sh records what it suppressed in the sticky comment's")
+w("ledger and harvest-feedback.sh reads it back, so this page can say which part")
+w("of the gap between the two columns is our own instruction.")
+w("")
+w("The record exists on %d of the window's %d pull request(s)."
+  % (docs_recorded, len(prs)))
+w("There is no record at all on %d of them — reviewed before post-review.sh began"
+  % max(0, len(prs) - docs_recorded))
+w("writing it, and nothing can now say what was suppressed there.")
+w("**Every count below is a floor**")
+w("bounded by that coverage, and a zero on an uncovered pull request means no")
+w("record, not no suppression.")
+w("")
+w("| | count |")
+w("|---|---|")
+w("| findings of theirs our prompt suppressed | %d |" % supp_entries)
+w("| on how many pull requests | %d |" % supp_entry_prs)
+w("| naming a thread no longer on the pull request | %d |" % supp_orphans)
+w("| blocking and author-confirmed among them | %d |" % supp_blocking)
+w("| of those, our summary called blocking anyway | %d |" % supp_blocking_agreed)
+w("")
+w("The last row is the only signal that separates \"we would have caught it\"")
+w("from \"we were told not to raise it\", and it is weak on purpose. The reviewer")
+w("is asked to say, in its summary, when it checks a suppressed finding against")
+w("the code and judges it blocking. **It cannot tell an independent judgement")
+w("from agreement with a finding the prompt had just shown it**, and nothing")
+w("observable can. So that count is evidence for a bucket and never a recall")
+w("claim, saying nothing is read as having no opinion rather than as a miss, and")
+w("no number on this page moves into our column on the strength of it.")
+w("")
+w("The suppression itself stays. Deleting it would buy an honest metric at the")
+w("price of two threads saying the same thing on every pull request — a cost the")
+w("author pays and the measurement does not.")
+w("")
 
 w("## Per pull request")
 w("")
