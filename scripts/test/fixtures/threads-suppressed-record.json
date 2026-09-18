@@ -1,0 +1,111 @@
+{
+ "data": {
+  "repository": {
+   "pullRequest": {
+    "title": "KOR-1 : trois constats, deux etouffes",
+    "state": "OPEN",
+    "comments": {
+     "totalCount": 1,
+     "nodes": [
+      {
+       "author": {
+        "login": "github-actions",
+        "__typename": "Bot"
+       },
+       "createdAt": "2026-09-16T09:00:00Z",
+       "body": "<!-- claude-review:summary -->\n## Resume\n\n| Severite | Nombre |\n|---|---|\n| 🔴 Bloquant | 0 |\n\n<!-- claude-review:ledger eyJmaW5kaW5ncyI6IFtdLCAic3VwcHJlc3NlZCI6IFt7ImJ5IjogImNvZGVyYWJiaXRhaSIsICJjb25jdXJyZWQiOiBmYWxzZSwgImtleSI6ICJjMjk5NjZjMCIsICJwYXRoIjogInNyYy9wYXkudHMiLCAic2V2ZXJpdHkiOiAiYmxvY2tpbmcifSwgeyJieSI6ICJjb2RlcmFiYml0YWkiLCAiY29uY3VycmVkIjogdHJ1ZSwgImtleSI6ICJmMzI1ZDNkYiIsICJwYXRoIjogInNyYy9xdWV1ZS50cyIsICJzZXZlcml0eSI6ICJibG9ja2luZyJ9LCB7ImJ5IjogImNvZGVyYWJiaXRhaSIsICJjb25jdXJyZWQiOiBmYWxzZSwgImtleSI6ICIwYmFkZjAwZCIsICJwYXRoIjogInNyYy9nb25lLnRzIiwgInNldmVyaXR5IjogImJsb2NraW5nIn1dLCAidmVyc2lvbiI6IDJ9 -->"
+      }
+     ]
+    },
+    "reviewThreads": {
+     "nodes": [
+      {
+       "isResolved": false,
+       "isOutdated": false,
+       "path": "src/pay.ts",
+       "line": 41,
+       "comments": {
+        "nodes": [
+         {
+          "databaseId": 900100,
+          "author": {
+           "login": "coderabbitai",
+           "__typename": "Bot"
+          },
+          "createdAt": "2026-09-16T08:00:00Z",
+          "body": "_🔒 Security_ | _🔴 Critical_\n\n🔴 Bloquant — le montant n'est pas revalide cote serveur."
+         },
+         {
+          "databaseId": 900101,
+          "author": {
+           "login": "devnine",
+           "__typename": "User"
+          },
+          "createdAt": "2026-09-16T10:00:00Z",
+          "body": "Retenu, corrige."
+         }
+        ]
+       }
+      },
+      {
+       "isResolved": false,
+       "isOutdated": false,
+       "path": "src/queue.ts",
+       "line": 88,
+       "comments": {
+        "nodes": [
+         {
+          "databaseId": 900200,
+          "author": {
+           "login": "coderabbitai",
+           "__typename": "Bot"
+          },
+          "createdAt": "2026-09-16T08:00:00Z",
+          "body": "_🗄 Data_ | _🔴 Critical_\n\n🔴 Bloquant — la file rejoue le message sans cle d'idempotence."
+         },
+         {
+          "databaseId": 900201,
+          "author": {
+           "login": "devnine",
+           "__typename": "User"
+          },
+          "createdAt": "2026-09-16T10:00:00Z",
+          "body": "Retenu, corrige."
+         }
+        ]
+       }
+      },
+      {
+       "isResolved": false,
+       "isOutdated": false,
+       "path": "src/free.ts",
+       "line": 12,
+       "comments": {
+        "nodes": [
+         {
+          "databaseId": 900300,
+          "author": {
+           "login": "coderabbitai",
+           "__typename": "Bot"
+          },
+          "createdAt": "2026-09-16T08:00:00Z",
+          "body": "_🎯 Correctness_ | _🔴 Critical_\n\n🔴 Bloquant — la date est comparee en fuseau local."
+         },
+         {
+          "databaseId": 900301,
+          "author": {
+           "login": "devnine",
+           "__typename": "User"
+          },
+          "createdAt": "2026-09-16T10:00:00Z",
+          "body": "Retenu, corrige."
+         }
+        ]
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

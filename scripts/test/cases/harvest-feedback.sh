@@ -412,3 +412,118 @@ print('lines', ','.join(str(f.get('line')) for f in fs),
 it "keeps a ruling a human wrote by hand, all four fields of it"
 assert_contains "lines 13,23,33,43,53,63,73 - verdict 7 of 7 - severity 7 of 7 - by 7 of 7 - why 7 of 7" \
   "a re-harvest does not erase a judgement nothing can regenerate" -- _reharvest_keeps_a_ruling
+
+# --- reading back what our own prompt told the reviewer not to raise ---------
+#
+# post-review.sh --mode pre hands the reviewer an "already known" block whose
+# `theirs` section says, of every finding the other reviewer or a human posted
+# first, "do not post an inline comment on any of them". `post` writes what it
+# suppressed into the ledger blob of the sticky comment — version 2,
+# {path, key, severity, by, concurred} — and NOTHING read it. So report.sh went
+# on publishing "author-confirmed blocking findings of theirs we did not raise"
+# with no way of saying which of them our own instruction had forbidden.
+#
+# `key` is sha256(the thread's opening comment)[:8], which is exactly what
+# finding_key() digests, so the join needs no new identifier. This file already
+# reads that comment's body for the presence flag, so it needs no new API call
+# either.
+
+_supp_dir() { printf '%s' "$TESTTMP/cr-test-suppressed"; }
+
+# _supp FIXTURE PR — harvest one fixture and print, per path, the two flags.
+_supp() {
+  rm -rf "$(_supp_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr "$2" --out "$(_supp_dir)" \
+    --threads-file "$FIXTURES/$1" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+for f in d['findings']:
+    print('%s suppressed=%s concurred=%s by=%s' % (
+        f['path'], f.get('suppressed_at_review', 'ABSENT'),
+        f.get('suppressed_concurred', 'ABSENT'), f.get('suppressed_by', 'ABSENT')))
+print('record=%s' % json.dumps(d.get('suppressed_by_us', 'ABSENT'), sort_keys=True))
+" "$(_supp_dir)/test/repo/$2.json"
+}
+
+_supp_record() { _supp threads-suppressed-record.json 200; }
+
+it "marks the findings our own prompt told the reviewer to leave alone"
+assert_contains "src/pay.ts suppressed=True concurred=False by=coderabbitai" \
+  "the record joins the finding on (path, digest of the opening comment)" -- _supp_record
+
+it "carries the reviewer's own judgement of a suppressed finding"
+assert_contains "src/queue.ts suppressed=True concurred=True by=coderabbitai" \
+  "the summary said this one is blocking, and the flag survives the harvest" -- _supp_record
+
+it "leaves a finding nobody suppressed unmarked"
+assert_contains "src/free.ts suppressed=ABSENT" \
+  "absent is not False: only a record makes the claim" -- _supp_record
+
+it "keeps the whole record, including a suppression whose thread is gone"
+# A thread deleted or lost to a force-push leaves no finding to flag, and the
+# record is then the only evidence that the reviewer was ever told to leave it
+# alone. Dropping the unmatched entries would make the instruction look smaller
+# than it was, in exactly the direction that flatters us.
+assert_contains '"path": "src/gone.ts"' \
+  "an entry matching no thread is still on the document" -- _supp_record
+
+it "does not read a ledger written before the record as an empty record"
+# Version 1 says NOTHING about suppression; version 2 with an empty list says
+# this run suppressed nothing. A reader that cannot tell them apart reports
+# "we suppressed nothing" for every pull request reviewed before 2026-09-18.
+_supp_versions() {
+  printf 'v2 %s\n' "$(_supp threads-suppressed-record.json 200 | grep '^src/pay.ts')"
+  printf 'v1 %s\n' "$(_supp threads-suppressed-v1.json 201 | grep 'record=')"
+}
+assert_contains "v1 record=\"ABSENT\"" \
+  "a version 1 ledger leaves the field off the document entirely" -- _supp_versions
+assert_contains "v2 src/pay.ts suppressed=True" \
+  "while a version 2 ledger on the same threads marks them" -- _supp_versions
+
+it "takes the record off our own sticky comment and nobody else's"
+# The marker is a plain string and the blob is base64 anybody can paste. This
+# record decides which findings of theirs stop counting against our reviewer,
+# so a passer-by who can write it can retire the criterion. The fixture has two
+# comments carrying the marker: a human's, listing src/pay.ts, and ours,
+# listing src/queue.ts.
+_supp_impostor() { _supp threads-suppressed-impostor.json 202; }
+assert_contains "src/pay.ts suppressed=ABSENT" \
+  "a human's paste of the blob suppresses nothing" -- _supp_impostor
+assert_contains "src/queue.ts suppressed=True" \
+  "and our own comment in the same thread is still read" -- _supp_impostor
+
+it "re-derives the flags every harvest instead of carrying them over"
+# They are NOT in CARRIED_OVER, and that is the point. The carry-over fires on
+# `kept.get(field) is not None and finding.get(field) is None` — precisely the
+# shape of a flag written only when true — so a suppression that a later run
+# corrected, or a sticky comment a human edited, would keep a True nothing on
+# the pull request supports any more. The verdicts in CARRIED_OVER cannot be
+# regenerated; these can, from the comment, on every single harvest.
+_supp_reharvest() {
+  rm -rf "$(_supp_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 203 --out "$(_supp_dir)" \
+    --threads-file "$FIXTURES/threads-suppressed-record.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  first="$(python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+print([f.get('suppressed_at_review', 'ABSENT') for f in d['findings']
+       if f['path'] == 'src/pay.ts'][0])
+" "$(_supp_dir)/test/repo/203.json")" || return 1
+  # The record is corrected: the same pull request, re-reviewed by a run whose
+  # ledger no longer holds that entry.
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 203 --out "$(_supp_dir)" \
+    --threads-file "$FIXTURES/threads-suppressed-v1.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  second="$(python3 -c "
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+print([f.get('suppressed_at_review', 'ABSENT') for f in d['findings']
+       if f['path'] == 'src/pay.ts'][0])
+" "$(_supp_dir)/test/repo/203.json")" || return 1
+  printf 'first %s then %s\n' "$first" "$second"
+}
+assert_contains "first True then ABSENT" \
+  "a record that is no longer written is no longer claimed" -- _supp_reharvest

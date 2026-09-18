@@ -25,6 +25,19 @@
 # records `original_commit_id` so that never happens. That is not a theoretical
 # concern — it is how a true positive on Aileaneprod/korbyx#13 was mis-scored.
 #
+# It also reads back, off our own sticky comment, WHAT OUR OWN PROMPT TOLD THE
+# REVIEWER NOT TO RAISE. post-review.sh --mode pre hands the reviewer a block
+# saying "do not post an inline comment" on any finding the other reviewer or a
+# human filed first, and records each one in the sticky comment's ledger blob
+# (version 2). A finding named there is written back here as
+# `suppressed_at_review`, with `suppressed_concurred` when our summary called it
+# blocking anyway, and the whole record is kept as `suppressed_by_us`. It costs
+# no API call: the same comment is already read for the presence flag.
+#
+# Without it, report.sh's exit criterion — author-confirmed blocking findings
+# the other reviewer raised and we did not — was partly measuring an instruction
+# we gave ourselves, with nothing on the page able to say so.
+#
 # This script only COLLECTS. It never edits prompts. Turning records into
 # lessons is propose-learnings.sh, whose output a human reviews and merges.
 #
@@ -52,7 +65,7 @@ while [ "$#" -gt 0 ]; do
     --out)  [ "$#" -ge 2 ] || die "--out requires a value";  out_dir="$2";   shift 2 ;;
     --threads-file) [ "$#" -ge 2 ] || die "--threads-file requires a value"; threads_file="$2"; shift 2 ;;
     --rest-file)    [ "$#" -ge 2 ] || die "--rest-file requires a value";    rest_file="$2";    shift 2 ;;
-    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,44p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -120,6 +133,7 @@ mkdir -p "${out_dir}/${owner}/${name}"
 
 python3 - "${work_dir}/threads.json" "${work_dir}/rest.json" \
           "${out_dir}/${owner}/${name}/${pr_number}.json" "$repo" "$pr_number" <<'PY'
+import base64
 import hashlib
 import json
 import os
@@ -196,6 +210,19 @@ def finding_key(finding):
 # the finding text) — so a ruling written against one finding can never land on
 # another, and a finding whose text is edited after the ruling loses it rather
 # than keeping a judgement of text nobody ruled on.
+#
+# `suppressed_at_review` and its two companions are deliberately NOT here. What
+# every field above has in common is that nothing on the pull request can
+# rebuild it: a model verdict costs a call to re-make, a human's ruling cannot
+# be re-made at all. The suppression flags are the opposite — they are re-read
+# from the sticky comment on every single harvest, for free.
+#
+# Carrying them would actively lie. The loop below fires on
+# `kept.get(field) is not None and finding.get(field) is None`, which is exactly
+# the shape of a flag written only when true: a suppression that a later run
+# corrected, or a record a human edited out of the comment, would keep its True
+# for as long as the document lives, with nothing on the pull request supporting
+# it any more. A stale flag here retires a finding from the exit criterion.
 CARRIED_OVER = ("key", "verdict_llm", "verdict_llm_key", "verdict_llm_quote",
                 "verdict_keyword", "verdict_human", "severity_human",
                 "ruled_by", "ruling")
@@ -393,7 +420,51 @@ if isinstance(total_comments, int) and total_comments > len(seen_comments):
         "if our summary is beyond that, presence will read as absent\n"
         % (len(seen_comments), total_comments, repo, pr))
 
+# The same comment carries the record of WHAT WE TOLD THE REVIEWER NOT TO RAISE.
+#
+# post-review.sh --mode pre builds an "already known" block whose `theirs`
+# section instructs the reviewer not to post an inline comment on any finding
+# the other reviewer or a human filed first, and `post` writes each suppressed
+# finding into the ledger blob of this very comment: version 2,
+# {path, key, severity, by, concurred}. `key` is sha256 of the thread's opening
+# comment, first 8 hex — byte for byte what finding_key() digests over
+# `finding`, which IS that opening comment. So the record and this document join
+# on (path, key) without either side learning a new identifier, and because the
+# body is already being read two lines up, without a second API call.
+#
+# It is read off OUR comment only, inside the guard above. The marker is a plain
+# string and the blob is base64 anybody can paste; this record decides which
+# findings of theirs stop being counted against our reviewer, so a passer-by who
+# could write it could retire the criterion.
+LEDGER_PREFIX = "<!-- claude-review:ledger "
+LEDGER_SUFFIX = " -->"
+
+
+def ledger_of(body):
+    """The decoded ledger blob of a sticky comment, or {}.
+
+    A truncated, re-wrapped or hand-edited comment is not a reason to fail the
+    harvest: it costs the record for that pull request, which then reads as
+    "nothing says this was suppressed" — the same as before any of it existed.
+    """
+    if LEDGER_PREFIX not in (body or ""):
+        return {}
+    chunk = body.split(LEDGER_PREFIX, 1)[1].split(LEDGER_SUFFIX, 1)[0].strip()
+    try:
+        payload = json.loads(base64.b64decode(chunk).decode("utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 our_summary_at = None
+# None until a version 2 ledger is actually read, and a list from then on — an
+# ABSENT field and an empty list are different claims. Version 1 says nothing
+# about suppression; version 2 with an empty list says this run suppressed
+# nothing. Collapsing the two would report "we suppressed nothing" for every
+# pull request reviewed before the recorder shipped.
+suppressed_by_us = None
+suppressed_seen = set()
 for comment in seen_comments:
     if not isinstance(comment, dict):
         continue
@@ -403,6 +474,41 @@ for comment in seen_comments:
         # The sticky is upserted in place, so there is normally exactly one.
         # Take the last if a stray duplicate survives collapsing.
         our_summary_at = comment.get("createdAt") or our_summary_at
+        payload = ledger_of(comment.get("body"))
+        version = payload.get("version")
+        if not (isinstance(version, int) and version >= 2):
+            continue
+        if suppressed_by_us is None:
+            suppressed_by_us = []
+        # Unioned across duplicates rather than replaced, for the reason `post`
+        # unions it in the first place: two runs can see different threads, and
+        # the claim made is "at some run, the reviewer was told not to file
+        # this", which a later, quieter run does not withdraw.
+        for item in payload.get("suppressed") or []:
+            if not isinstance(item, dict):
+                continue
+            where = (item.get("path"), item.get("key"))
+            if not all(where) or where in suppressed_seen:
+                continue
+            suppressed_seen.add(where)
+            suppressed_by_us.append(item)
+
+# Re-derived on every harvest, never carried over — see CARRIED_OVER above for
+# why that distinction matters. `suppressed_by` travels with the flag because
+# the block suppresses a HUMAN's thread too, and a human is not the reviewer we
+# are being measured against: only the consumer knows which login that is.
+by_where = dict(((item["path"], item["key"]), item)
+                for item in (suppressed_by_us or []))
+for finding in records:
+    item = by_where.get(finding_key(finding))
+    if item is None:
+        continue
+    finding["suppressed_at_review"] = True
+    # False is a real value here and means "our summary said nothing about it",
+    # which is no opinion rather than a miss. See post-review.sh on why the flag
+    # can never be read as a recall claim.
+    finding["suppressed_concurred"] = bool(item.get("concurred"))
+    finding["suppressed_by"] = item.get("by")
 
 for finding in records:
     kept = previous.get(finding_key(finding))
@@ -421,6 +527,13 @@ out = {
     "our_summary_at": our_summary_at,
     "findings": records,
 }
+# Whole, including the entries no thread matched. A thread deleted or lost to a
+# force-push leaves no finding to carry the flag, and then this list is the only
+# evidence left that the reviewer was told to leave it alone — dropping it would
+# make the instruction look smaller than it was, in the direction that flatters
+# us. Omitted entirely when no version 2 ledger was read: see above.
+if suppressed_by_us is not None:
+    out["suppressed_by_us"] = suppressed_by_us
 with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
     json.dump(out, fh, indent=2, ensure_ascii=False)
     fh.write("\n")
@@ -431,6 +544,13 @@ for r in records:
     slot[r["verdict_guess"]] = slot.get(r["verdict_guess"], 0) + 1
 
 sys.stderr.write("harvest-feedback: %s#%s -> %s\n" % (repo, pr, out_path))
+if suppressed_by_us:
+    sys.stderr.write(
+        "  %-22s %d recorded, %d matched a thread harvested here, %d with a "
+        "judgement of ours\n"
+        % ("told not to raise", len(suppressed_by_us),
+           sum(1 for f in records if f.get("suppressed_at_review")),
+           sum(1 for f in records if f.get("suppressed_concurred"))))
 for reviewer, counts in sorted(by_reviewer.items()):
     detail = ", ".join("%s=%d" % kv for kv in sorted(counts.items()))
     sys.stderr.write("  %-22s %s\n" % (reviewer, detail))
