@@ -58,10 +58,12 @@
 #     looks reviewed. rereview-open-prs.sh says so on stderr; unattended, the
 #     log is exactly what nobody reads, so it is hoisted above the report.
 #
-# Exit status: 1 if any listed repository could not be checked at all. The
-# premise of this tool is that nobody is watching the run, so a repository that
-# was archived, renamed, or lost the token's access has to reach a person
-# somehow — and a failed scheduled run is the only channel that does.
+# Exit status: 1 if any listed repository did not come back clean — out of
+# reach entirely (archived, renamed, the token's access gone), or checked with
+# something in it left uninspected, which rereview-open-prs.sh also reports by
+# exiting 1. The premise of this tool is that nobody is watching the run, so
+# either has to reach a person somehow, and a failed scheduled run is the only
+# channel that does. Which one it was is in that repository's own block.
 #
 # Requires: gh (authenticated), python3, rereview-open-prs.sh beside it.
 
@@ -88,7 +90,7 @@ while [ "$#" -gt 0 ]; do
     --limit)  [ "$#" -ge 2 ] || die "--limit requires a value";  limit="$2";      shift 2 ;;
     --check)  [ "$#" -ge 2 ] || die "--check requires a value";  check_name="$2"; shift 2 ;;
     --rerun)  rerun=1; shift ;;
-    -h|--help) sed -n '2,66p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)        die "unknown argument: $1" ;;
   esac
 done
@@ -228,7 +230,7 @@ while read -r repo workflow; do
 
   {
     printf '#### %s\n\n' "$repo"
-    [ "$status" -eq 0 ] || printf 'Could not be checked (exit %s).\n\n' "$status"
+    [ "$status" -eq 0 ] || printf 'Did not come back clean (exit %s) — the output below says whether it was out of reach or checked with something left uninspected.\n\n' "$status"
     printf '```\n'
     cat "$out"
     printf '```\n\n'
@@ -258,7 +260,14 @@ if [ -s "$blind" ]; then
 fi
 
 if [ "$failed" -gt 0 ]; then
-  printf '**%s %s in the list could not be checked at all** — archived, renamed, or the token lost access. This run is marked failed so that it reaches somebody.\n\n' \
+  # Two different things exit non-zero, and the header must not pick one and
+  # call it the other. rereview-open-prs.sh stops outright when a repository is
+  # out of reach — archived, renamed, the token without access — AND it exits 1
+  # after a pass it completed in which some pull request could not be fully
+  # inspected. The first needs the roster edited; the second is often a read
+  # that will work tomorrow. Which one it was is in that repository's own
+  # output, printed below, so this line says only what is true of both.
+  printf '**%s %s in the list did not come back clean** — either out of reach entirely (archived, renamed, or the token lost access) or checked with something in it left uninspected. The block for each one below says which. This run is marked failed so that it reaches somebody.\n\n' \
     "$failed" "$(plural "$failed" repository repositories)"
 fi
 
