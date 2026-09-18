@@ -353,7 +353,15 @@ jobs:
 
           # Changed lines, counted only over files that survived exclusion, so a
           # regenerated lockfile cannot push a small PR into triage mode.
+          #
+          # The same rows are kept per file, because triage below ranks by them.
+          # A binary file has `-` in both columns and contributes 0, which is the
+          # documented limitation of counting from --numstat. A RENAME has no row
+          # under its own name either: git writes the third field as
+          # `old => new`, which is not a member of kept_set, so it is skipped
+          # here exactly as it always was and ranks 0 below.
           changed_lines = 0
+          lines_by_file = {}
           with open(os.path.join(tmp, "numstat.txt"), encoding="utf-8") as fh:
               for line in fh:
                   parts = line.rstrip("\n").split("\t")
@@ -362,13 +370,39 @@ jobs:
                   added, removed, path = parts
                   if path not in kept_set:
                       continue
-                  for value in (added, removed):
-                      if value.isdigit():
-                          changed_lines += int(value)
+                  touched = sum(int(v) for v in (added, removed) if v.isdigit())
+                  changed_lines += touched
+                  lines_by_file[path] = lines_by_file.get(path, 0) + touched
 
           limit = int(config.get("max_diff_lines", 2000))
           triage = changed_lines > limit
 
+          # The risk vocabulary. It is NOT wrong about risk — a 12-line change to
+          # an auth path is worth reading before a 400-line test — and it is kept
+          # here unchanged. It was only ever wrong as the *whole* rule, and
+          # silently so, because it is a list of ENGLISH words matched against a
+          # path. On an English codebase "keep what this matches" reads as "keep
+          # the risky files". On any other it reads as "keep the files that
+          # happen to be named in English", and nothing in the output says which
+          # of the two just happened.
+          #
+          # Measured on Aileaneprod/korbyx, whose code and file names are French,
+          # from the `changed=… kept=… reviewed=…` line these runs printed:
+          #
+          #     PR 218   kept 31 -> reviewed  2   (run 35072472728)
+          #     PR 202   kept 39 -> reviewed  3   (run 34937782439)
+          #     PR  82   kept 42 -> reviewed  9   (run 33628523366)
+          #     PR 146   kept 10 -> reviewed  2   (run 34479984356)
+          #
+          # That is not narrowing a review, it is discarding one — PR 146 threw
+          # away eight files of ten, on a diff 158 lines over the limit, to save
+          # nothing worth saving. Four findings the author later confirmed as
+          # blocking sat in files dropped by this regex, and the handful that
+          # survived on 218 and 146 survived because "query" is an English word
+          # a French project also writes. A repository-configurable vocabulary
+          # was considered and rejected: it fails closed the same way for the
+          # next language, and it asks each repository to predict in advance the
+          # words that will matter.
           HIGH_RISK = re.compile(
               r"(auth|login|session|token|secret|password|credential|key|"
               r"payment|billing|invoice|charge|stripe|"
@@ -379,12 +413,50 @@ jobs:
               re.IGNORECASE,
           )
 
+          # How many files a triage review reads. 25 is not a new number: it is
+          # the bound the old "nothing matched, look at something anyway"
+          # fallback already used, promoted from a special case to the rule. One
+          # file is roughly one turn against the 60-turn ceiling
+          # (config/defaults.yml), and the most turns a finished review has ever
+          # taken is 43, so a full budget still leaves headroom.
+          #
+          # WHAT IT COSTS. A triage review now reads up to 25 files where the
+          # four runs above read 2, 3, 9 and 2 — so on an oversized diff it
+          # costs roughly what an ordinary review costs, and triage stops being
+          # a quota saving and becomes purely a bound on the work. That is the
+          # trade being made deliberately: the saving was measured, and what it
+          # bought was reviews that read two files of thirty-one. Guards 0 to 5
+          # are where quota is saved; this one only decides where a review that
+          # is happening anyway should look. If reviews start dying on
+          # error_max_turns, lower this number — not max_turns.
+          TRIAGE_BUDGET = 25
+
+          risk_flagged = [f for f in kept if HIGH_RISK.search(f)]
+
           if triage:
-              reviewed = [f for f in kept if HIGH_RISK.search(f)]
-              # A huge diff touching nothing risk-flagged still deserves a look;
-              # take a bounded slice rather than reviewing nothing at all.
-              if not reviewed:
-                  reviewed = kept[:25]
+              # Risk is a FLOOR, not the whole rule. Everything the vocabulary
+              # flags survives, in both directions: a diff that flags more than
+              # TRIAGE_BUDGET files keeps all of them, exactly as it did before
+              # this budget existed.
+              #
+              # The rest of the budget goes to the files with the most changed
+              # lines, because a pull request is usually about the files it
+              # changes most, and a line count is the one signal that cannot be
+              # written in the wrong language.
+              #
+              # This also subsumes the old fallback rather than dropping it: a
+              # huge diff touching nothing risk-flagged still gets looked at,
+              # and now gets the 25 biggest files instead of the first 25 in
+              # git's ordering.
+              flagged = set(risk_flagged)
+              rest = [f for f in kept if f not in flagged]
+              # Ties broken by path, so one diff always yields one file set and
+              # the `reviewed=` line below compares across runs.
+              rest.sort(key=lambda f: (-lines_by_file.get(f, 0), f))
+              # Flagged files lead the list handed to the prompt; when the
+              # reviewer runs out of turns, it runs out on the least changed
+              # file rather than on an auth path.
+              reviewed = risk_flagged + rest[:max(0, TRIAGE_BUDGET - len(risk_flagged))]
           else:
               reviewed = kept
 
@@ -392,9 +464,16 @@ jobs:
                     encoding="utf-8", newline="\n") as fh:
               fh.write("\n".join(reviewed) + ("\n" if reviewed else ""))
 
+          # `risk=` is appended, not substituted, so the field this line has
+          # always carried keeps meaning what it did. It is here because the
+          # measurement that justified the rule above had to be reconstructed
+          # from raw file lists: the log said how many files were reviewed and
+          # never whether the vocabulary or the line ranking chose them. The
+          # next person auditing triage recall should not have to do that again.
           summary = (
-              "changed=%d kept=%d reviewed=%d lines=%d limit=%d triage=%s"
-              % (len(all_files), len(kept), len(reviewed), changed_lines, limit, triage)
+              "changed=%d kept=%d reviewed=%d lines=%d limit=%d triage=%s risk=%d"
+              % (len(all_files), len(kept), len(reviewed), changed_lines, limit,
+                 triage, len(risk_flagged))
           )
           print(summary)
 
