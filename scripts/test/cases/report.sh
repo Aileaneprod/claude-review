@@ -137,17 +137,28 @@ assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not ye
 
 # --- verdict precedence -------------------------------------------------------
 
-it "prefers a human correction over the model, and the model over keywords"
+it "prefers the model over keywords"
+# RETIRED ASSERTION, kept as a warning. This case used to read
+#
+#     it "prefers a human correction over the model, and the model over keywords"
+#     ... 'verdict_human': 'rejected', 'verdict_llm': 'accepted', ...
+#     assert_contains "| rejected | 1 |" "verdict_human wins" -- _report
+#
+# It was green for its whole life and it proved less than it claimed. Its
+# fixture set `verdict_llm` and `verdict_keyword` to the SAME value, so the half
+# of the title about the model outranking keywords was never exercised — that
+# half is this case, with the two set differently. The other half, a bare
+# `verdict_human` winning, is now a ruling and needs a name and a reason; see
+# the ruling cases at the end of this file.
 python3 -c "
 import json
 print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
                   'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
                                 'finding': '🟠 Important — x', 'author_reply': 'x',
-                                'verdict_human': 'rejected',
-                                'verdict_llm': 'accepted',
+                                'verdict_llm': 'rejected',
                                 'verdict_keyword': 'accepted'}]}))
 " | _seed
-assert_contains "| rejected | 1 |" "verdict_human wins" -- _report
+assert_contains "| rejected | 1 | 0 |" "the model outranks the keyword scan" -- _report
 
 # --- window and shape ---------------------------------------------------------
 
@@ -768,3 +779,150 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
 " | _seed
 assert_contains "\`a.ts:None\` aaaa1111" "the first is named" -- _report
 assert_contains "\`a.ts:None\` bbbb2222" "and so is the second" -- _report
+
+# --- a human's ruling ---------------------------------------------------------
+#
+# Two gaps, both measured on the ledger before any of this was written.
+#
+# `verdict_human` sat at the head of verdict_of()'s priority chain under the
+# comment "a human's own correction outranks the model". It appeared in 0 of the
+# 153 documents that carry findings, against 125 for `verdict_llm` — so the
+# documented priority was in practice `verdict_llm > verdict_keyword >
+# verdict_guess`, and the model was never once outranked by anybody. It was
+# designed and never wired: nothing said how to write one, and nothing promised
+# a hand-written field would still be there after the next harvest rewrote the
+# document from the API.
+#
+# And there was no field for severity at all, which is the one that bit. The
+# sole finding producing the published criterion was ACCEPTED by the author and
+# downgraded by him in the same reply — important rather than blocking, nothing
+# breaks at runtime. `verdict_human: rejected` would have been a rejection he
+# never made; there was nothing else to write; so the page kept publishing a
+# blocking miss its own evidence said was not blocking. A second finding runs
+# the other way — the observation right, the severity wrong — and is scored
+# `rejected` today, which counts a correct finding against the precision of the
+# reviewer being measured. A conservative keyword sweep finds nine author
+# replies that rule on severity, three of them on OUR findings, so this is a
+# missing concept and not one tool's problem.
+#
+# Every fixture below is synthetic.
+
+_ruled() {
+  # reviewer verdict severity [severity_human] [verdict_human] [by] [why]
+  RULE_REV="$1" RULE_V="$2" RULE_SEV="$3" RULE_SH="${4:-}" RULE_VH="${5:-}" \
+  RULE_BY="${6:-}" RULE_WHY="${7:-}" python3 -c "
+import json, os
+sev = {'blocking': '🔴 Bloquant', 'important': '🟠 Important',
+       'nit': '🟡 Nit'}[os.environ['RULE_SEV']]
+f = {'reviewer': os.environ['RULE_REV'], 'path': 'a.ts', 'line': 9,
+     'finding': sev + ' — a claim', 'author_reply': 'x',
+     'verdict_keyword': os.environ['RULE_V']}
+for field, key in (('severity_human', 'RULE_SH'), ('verdict_human', 'RULE_VH'),
+                   ('ruled_by', 'RULE_BY'), ('ruling', 'RULE_WHY')):
+    if os.environ.get(key):
+        f[field] = os.environ[key]
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'findings': [f]}))
+" | _seed
+}
+
+it "lets a human downgrade a severity without recording a rejection"
+# The shape of the finding that forced this. Their blocking finding, accepted by
+# the author, on a pull request we never ran on — the criterion counts it. The
+# human rules it important and accepted, both at once, and it leaves the
+# criterion while staying an accepted finding of theirs.
+_ruled coderabbitai accepted blocking important accepted \
+  "firas" "the author accepted it and downgraded it in the same reply"
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet |" \
+  "a finding the human says is not blocking is not a blocking miss" -- _report
+assert_contains "| accepted | 0 | 1 |" \
+  "and it is still an accepted finding of theirs, not a rejected one" -- _report
+assert_contains "| rejected | 0 | 0 |" \
+  "nothing was rejected, because the author rejected nothing" -- _report
+
+it "lets a human rule the other way and put a finding INTO the criterion"
+# The override has to be able to move the number up, or it is not a ruling, it
+# is a discount. Their finding reads important in its own text; the human says
+# blocking.
+_ruled coderabbitai accepted important blocking "" \
+  "firas" "it takes down the ingest for every tenant, which is blocking"
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "a severity ruling can add a miss as well as remove one" -- _report
+
+it "prints what the classifier alone said beside what the human ruled"
+# The trace, and the reason the mechanism is allowed to exist at all. A hand
+# edit that silently moved the headline would be no better than the silent
+# misreading this page already corrected once; both columns are printed on the
+# same page, and the criterion paragraph says how far a person moved it.
+_ruled coderabbitai accepted blocking important accepted \
+  "firas" "the author accepted it and downgraded it in the same reply"
+assert_contains "| Blocking findings of theirs we did not raise | 1 | 0 |" \
+  "the classifier's own count is published beside the ruled one" -- _report
+assert_contains "**1 of that figure rests on a human's ruling, not on the classifier.**" \
+  "and the criterion says so where the criterion is read" -- _report
+assert_contains "firas: the author accepted it and downgraded it in the same reply" \
+  "with the name of whoever ruled and the reason they gave" -- _report
+
+it "counts, per side, how much of the table a person decided"
+# One ruling at a time, and the counter that should NOT move asserted beside the
+# one that should. A fixture carrying both rulings cannot tell the two counters
+# apart: a page that swapped them would read exactly as right, and the reader
+# would be told a severity was a verdict.
+_ruled coderabbitai accepted blocking important "" \
+  "firas" "the author accepted it and downgraded it in the same reply"
+assert_contains "| severity set by a human ruling, not the text | 0 | 1 |" \
+  "a severity ruling is counted as a severity ruling" -- _report
+assert_contains "| verdict set by a human ruling, not the classifier | 0 | 0 |" \
+  "and not as a verdict ruling nobody wrote" -- _report
+_ruled coderabbitai accepted blocking "" rejected \
+  "firas" "the reply answers a neighbouring thread, not this finding"
+assert_contains "| verdict set by a human ruling, not the classifier | 0 | 1 |" \
+  "a verdict ruling is counted as a verdict ruling" -- _report
+assert_contains "| severity set by a human ruling, not the text | 0 | 0 |" \
+  "and not as a severity ruling nobody wrote" -- _report
+
+it "refuses a ruling that says neither who ruled nor why"
+# The bare field is refused rather than applied. It is the only field on this
+# document a person writes by hand into a file every other field of which is
+# machine-written, and it moves the number that ends a contract: unattributed,
+# it cannot be told apart from a stray field written by a bug. Refusing costs
+# nothing measured — `verdict_human` occurs zero times in the ledger — and the
+# refusal is NAMED, because a ruling that quietly does nothing is exactly the
+# defect this whole section exists to close.
+_ruled coderabbitai accepted blocking important
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "an unattributed ruling does not move the criterion" -- _report
+assert_contains "### rulings this page refused" \
+  "and the page opens a section for it rather than dropping it" -- _report
+assert_contains "written without \`ruled_by\` or \`ruling\`" \
+  "naming the finding and what is missing from the ruling" -- _report
+
+it "refuses a ruling whose severity is not one of the four"
+# `severity_human: "orange"`, or the emoji itself, has to fail loudly. Coercing
+# it, or ignoring it in silence, would rebuild by hand the defect the chain
+# already had: a field that looks honoured and never fires.
+_ruled coderabbitai accepted blocking orange "" \
+  "firas" "meant important, wrote the colour"
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 1 | FAIL (thin window) |" \
+  "a severity nobody can act on leaves the classifier's reading standing" -- _report
+assert_contains "\`severity_human: orange\` is not one of blocking, important, nit, preexisting" \
+  "and the page says exactly what was wrong with it" -- _report
+
+it "refuses a verdict a human may not write, and honours one they may"
+# `unknown` is what the classifier says when it cannot read the reply. A human
+# who cannot tell either has not ruled.
+_ruled claude accepted important "" unknown "firas" "cannot tell from the thread"
+assert_contains "\`verdict_human: unknown\` is not one of accepted, partial, rejected, acknowledged, no_reply" \
+  "a human does not get to record that they could not decide" -- _report
+_ruled claude accepted important "" rejected "firas" "read the thread; the author was being polite"
+assert_contains "| rejected | 1 | 0 |" "an attributed verdict ruling outranks the classifier" -- _report
+
+it "tells a reader how to rule even when nobody has ruled yet"
+# `verdict_human` was honoured by report.sh for months and written zero times in
+# 153 documents. A mechanism nobody can find is the same as no mechanism, so the
+# instructions print on every page, not only on the ones that already use them.
+_ruled coderabbitai accepted important
+assert_contains "_None in this window._ Every number above is the classifier's." \
+  "the page says plainly that no human has ruled" -- _report
+assert_contains '"severity_human": "blocking" | "important" | "nit" | "preexisting",' \
+  "and prints the fields to write and where to write them" -- _report

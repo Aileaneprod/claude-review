@@ -178,8 +178,27 @@ def finding_key(finding):
 # different verdict, reopening "verdicts free to flip between runs" too. The
 # stamp digests the finding text and the reply, not the position, so carrying it
 # is safe across the re-anchoring described on finding_key above.
+#
+# The last four are a HUMAN'S RULING, and they are the only fields in this
+# document a person writes by hand. Everything else here is rebuilt from the API
+# on the next run, which is exactly the hazard: a ruling the next harvest erases
+# is worse than no ruling at all, because the person who wrote it has no way of
+# knowing it is gone and the page goes back to the classifier's answer without
+# saying so. report.sh honours all four — see its header — and it can only do
+# that because they survive this rebuild.
+#
+# `severity_human` is separate from `verdict_human` on purpose. The finding that
+# forced the concept was accepted on its substance and downgraded on its
+# severity in the same reply, and a taxonomy with only a verdict has to record
+# that as a rejection the author never made.
+#
+# They are carried under the SAME key as the model verdicts — (path, digest of
+# the finding text) — so a ruling written against one finding can never land on
+# another, and a finding whose text is edited after the ruling loses it rather
+# than keeping a judgement of text nobody ruled on.
 CARRIED_OVER = ("key", "verdict_llm", "verdict_llm_key", "verdict_llm_quote",
-                "verdict_keyword", "verdict_human")
+                "verdict_keyword", "verdict_human", "severity_human",
+                "ruled_by", "ruling")
 
 previous = {}
 if os.path.exists(out_path):

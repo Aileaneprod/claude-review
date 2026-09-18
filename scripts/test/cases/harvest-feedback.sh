@@ -342,3 +342,73 @@ print('stamp', k, 'of', len(fs), '- quote', q, 'of', len(fs))
 " "$(_out_dir)/test/repo/3.json"
 }
 assert_contains "stamp 7 of 7 - quote 7 of 7" "the stamp travels with the verdict" -- _reharvest_keeps_stamp
+
+# --- a human's ruling has to outlive the harvest that wrote the finding -------
+#
+# `severity_human`, `ruled_by` and `ruling` are the fields report.sh reads to
+# let a person overrule the classifier — see its header. They are the only
+# fields in this document a HUMAN writes by hand, into a file every other field
+# of which this script rebuilds from the API on the next run, and harvest.yml
+# runs on everything touched in the last three days: that is, precisely the pull
+# requests still receiving commits, where a ruling is most likely to be written.
+#
+# A hand-written field the next harvest erases is worse than no field at all.
+# The person who wrote it has no way of knowing it is gone; the page silently
+# goes back to the classifier's answer; and unlike a model verdict, nothing can
+# regenerate it. `verdict_human` was already carried here for exactly that
+# reason, and its three companions have to travel with it or the ruling arrives
+# half-applied — a severity ruling lost while the verdict beside it survives is
+# the page reporting a judgement nobody made.
+#
+# The lines are SHIFTED between the two harvests, as a commit would shift them,
+# because the carry-over is keyed on (path, digest of the finding text) and a
+# fixture that never moves would not test that at all.
+_reharvest_keeps_a_ruling() {
+  rm -rf "$(_out_dir)"
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 4 --out "$(_out_dir)" \
+    --threads-file "$FIXTURES/threads-verdicts.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  # A human reads the thread and rules on it. Distinct values per finding, so a
+  # carry-over that matched the wrong finding cannot still count as right.
+  python3 -c "
+import json,sys
+p=sys.argv[1]
+d=json.load(open(p,encoding='utf-8'))
+for i, f in enumerate(d['findings']):
+    f['verdict_human']='accepted-%d' % i
+    f['severity_human']='important-%d' % i
+    f['ruled_by']='ruler-%d' % i
+    f['ruling']='because-%d' % i
+json.dump(d, open(p,'w',encoding='utf-8'), indent=2, ensure_ascii=False)
+" "$(_out_dir)/test/repo/4.json" || return 1
+  # The fixture is opened BY THE SHELL and piped: $FIXTURES is a POSIX path and
+  # the python on some developer machines is a native Windows build that cannot
+  # open it. See the neighbouring case for what a silent failure here costs.
+  python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+for t in d['data']['repository']['pullRequest']['reviewThreads']['nodes']:
+    if isinstance(t.get('line'), int):
+        t['line'] = t['line'] + 3
+json.dump(d, sys.stdout, indent=2, ensure_ascii=False)
+" <"$FIXTURES/threads-verdicts.json" >"$(_out_dir)/shifted-ruling.json" || return 1
+  "$SCRIPTS/harvest-feedback.sh" --repo test/repo --pr 4 --out "$(_out_dir)" \
+    --threads-file "$(_out_dir)/shifted-ruling.json" \
+    --rest-file "$FIXTURES/rest-verdicts.json" >/dev/null 2>&1 || return 1
+  python3 -c "
+import json,sys
+d=json.load(open(sys.argv[1],encoding='utf-8'))
+fs=d['findings']
+def kept(field, shape):
+    return sum(1 for i,f in enumerate(fs) if f.get(field)==shape % i)
+print('lines', ','.join(str(f.get('line')) for f in fs),
+      '- verdict', kept('verdict_human','accepted-%d'), 'of', len(fs),
+      '- severity', kept('severity_human','important-%d'), 'of', len(fs),
+      '- by', kept('ruled_by','ruler-%d'), 'of', len(fs),
+      '- why', kept('ruling','because-%d'), 'of', len(fs))
+" "$(_out_dir)/test/repo/4.json"
+}
+
+it "keeps a ruling a human wrote by hand, all four fields of it"
+assert_contains "lines 13,23,33,43,53,63,73 - verdict 7 of 7 - severity 7 of 7 - by 7 of 7 - why 7 of 7" \
+  "a re-harvest does not erase a judgement nothing can regenerate" -- _reharvest_keeps_a_ruling
