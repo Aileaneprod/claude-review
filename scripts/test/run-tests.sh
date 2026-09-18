@@ -33,8 +33,18 @@ export FIXTURES="${script_dir}/fixtures"
 # user's temp directory while python3 reads it as a literal \tmp at the drive
 # root — so a case that writes with one and reads with the other silently uses
 # two different files. cygpath -m yields C:/... , which both accept.
-TESTTMP="${TMPDIR:-/tmp}/cr-tests"
+#
+# Every process agrees on it; two processes must not SHARE it. The path was
+# fixed, so two suites running at once — a worktree beside the main checkout,
+# two sessions, a CI job and a person — wrote into each other's fixtures. Every
+# case here seeds a fixture and then reads it back through the code under test,
+# so the loser of that race tests the winner's fixture and reports a failure
+# that has nothing to do with the code. Measured, four concurrent runs of one
+# case: 1, 2, 2 and 6 assertions red, none of them reproducible alone (0 in 15).
+# A run that owns its directory cannot be raced, and takes it with it.
+TESTTMP="${TMPDIR:-/tmp}/cr-tests-$$"
 mkdir -p "$TESTTMP"
+trap 'rm -rf "$TESTTMP"' EXIT
 if command -v cygpath >/dev/null 2>&1; then
   TESTTMP="$(cygpath -m "$TESTTMP")"
 fi
