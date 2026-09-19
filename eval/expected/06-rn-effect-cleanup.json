@@ -13,8 +13,8 @@
     {
       "id": "decoy-subscription-cleans-up",
       "path": "src/screens/LiveOrdersScreen.tsx",
-      "any_of": ["subscribeToOrders", "unsubscribe", "useAppState"],
-      "why": "The subscription effect returns unsubscribe, and useAppState tears down its own AppState listener. Both are correct; flagging them is pattern-matching on 'useEffect' without reading the return value."
+      "any_of": ["subscription effect", "never unsubscribed", "no unsubscribe", "missing unsubscribe", "subscribeToOrders is not", "subscribeToOrders leaks", "useAppState"],
+      "why": "The subscription effect returns unsubscribe, and useAppState tears down its own AppState listener. Both are correct; flagging them is pattern-matching on 'useEffect' without reading the return value. `subscribeToOrders` and `unsubscribe` are the two context lines directly above the added effect, so they fired on the correct finding's own quote. Note the keywords stay anchored to the subscription: a bare 'no cleanup' would hit the real defect, which genuinely has none. `useAppState` is untouched — it is outside the diff, so nothing but a deliberate look at the hook produces it."
     },
     {
       "id": "decoy-flatlist-key-is-fine",

@@ -13,8 +13,8 @@
     {
       "id": "decoy-describe-is-exhaustive",
       "path": "src/billing.ts",
-      "any_of": ["describe(", "assertNever", "function describe"],
-      "why": "describe() ends in assertNever(event), so the compiler enforces exhaustiveness. Flagging it means the reviewer did not recognise the never-guard idiom."
+      "any_of": ["in describe", "describe is not", "describe() is not", "describe is missing", "describe() is missing", "describe does not handle", "describe() does not handle"],
+      "why": "describe() ends in assertNever(event), so the compiler enforces exhaustiveness. Flagging it means the reviewer did not recognise the never-guard idiom. `assertNever` was the worst keyword in the suite: it is the closing context line of the diff AND the name of the fix the correct finding recommends, so a right answer titled 'revenueDelta has no assertNever guard' scored as a decoy hit. A reviewer that missed the guard will not name it; it only ever caught the reviewer that read it."
     }
   ]
 }

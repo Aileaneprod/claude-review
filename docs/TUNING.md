@@ -291,6 +291,26 @@ cannot score a true positive for flagging the exact thing planted to catch it.
 Keep `must_find` keywords specific to the real defect — a keyword that also
 appears in the decoy's legitimate code makes the fixture unable to fail.
 
+**A `must_not_find` keyword must name the wrong claim, never the code.** The
+title-and-evidence haystack is only half a protection: `base.md` rule 1 requires
+`evidence` to be the exact offending line(s), so a keyword lifted out of the
+diff fires on the correct finding's own quote. `"IF NOT EXISTS"` on
+`10-generic-migration` failed the gate twice that way — an evidence block that
+reached from the `DELETE` up to the guarded `CREATE` two lines above scored a
+true positive as a decoy hit. Where the same keyword makes a `must_find`
+fixture unable to fail, it makes a `must_not_find` fixture unable to **pass**.
+
+So write the assertion a mistaken reviewer would make — `"missing if not
+exists"`, `"in list_products"`, `"never unsubscribed"`, `"trackAsync is not
+awaited"` — and give it polarity. A bare `"list_events is"` matches both
+"list_events is unbounded" and "list_events is bounded", so it punishes the
+contrast the haystack was narrowed to permit. An identifier is admissible only
+when it lives outside the diff (`run_in_threadpool`, `auditLog`,
+`httpHeaderAuth`): then the only way it reaches a title or a quote is that the
+reviewer went to the decoy and flagged it. `scripts/test/cases/eval-decoy-keywords.sh`
+enforces the mechanical half of this on every push and costs no model call;
+`must_find` is deliberately exempt, and the case says why.
+
 ## Version discipline
 
 Callers pin `@v1`, a moving tag. Re-tagging ships to every repo at once:
