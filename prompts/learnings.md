@@ -61,20 +61,6 @@ the team. No ADR existed — true; the demand was still wrong.
 
 ---
 
-## A README's own caveats usually answer the objection you are about to raise
-
-When a document says something surprising, read the paragraphs around it before
-reporting it. Authors routinely pre-empt the obvious objection one paragraph
-earlier, and a finding that ignores that reads as if the reviewer skimmed.
-
-**Evidence:** Aileaneprod/korbyx#13. Two CodeRabbit 🔴 findings claimed the
-fixtures carried real client names, citing *"la forme réellement rencontrée"*.
-Six lines above, the same README states *"Aucune donnée, aucun identifiant,
-aucun nom […] d'un client réel n'entre ici."* What was declared real was the
-shape of the divergence, not the names. Neither thread was ever answered.
-
----
-
 ## A legal identifier is real until the repository shows where it came from
 
 The lesson above settles names: a name the repository declares fictional is
@@ -132,52 +118,23 @@ that commit, `0618b01`, and did not raise it.
 ## A claim about a platform is looked up before it carries a 🔴
 
 "GitHub does X", "bash does Y": open the docs and quote them. A 🔴 on a false
-premise costs the author an hour and the label its credibility. The duty runs
-both ways: when the change under review asserts what a tool does, check the
-claim before letting it stand. "Not verifiable with the tools I have" is not an
-answer about a tool that is installed and has a `--help`.
+premise costs the author an hour and the label its credibility.
 
 **Evidence:** Aileaneprod/korbyx#114, #142 — two of five 🔴. "Step
 shells run with pipefail" (they run `bash -e`; `exit 1 | tee; echo $?` → 0) and
 "`GITHUB_SHA` on `release` is the branch tip" (docs: "last commit in the tagged
-release"). Both refuted by reproduction. The other direction, #116:
-documentation asserted a CLI's behaviour and a second document repeated the
-claim. Our summary named the line *"a question left open, not verifiable with
-the tools I have"* and stopped there; the CLI's own `--help` settled it. The
-author confirmed the finding we did not raise.
+release"). Both refuted by reproduction.
 
 
 ## A check is only as good as the stage it sits in
 
-When a value is validated, follow it one stage further — to the value that
-reaches the next function, the next column, the next render. A check that is
-correct about the value in front of it is routinely wrong about the value that
-leaves it: a shape test standing in for a validity test, a range test taken at
-the edge the next increment crosses, a flag computed before the truncation that
-contradicts it. Ask what the next stage receives, not whether this line is
-right on its own.
+Follow a validated value one stage further — to what reaches the next function,
+column or render. A check correct about the value in front of it is routinely
+wrong about the value that leaves it: a shape test standing in for a validity
+test, a range test taken at the edge the next increment crosses, a flag computed
+before the truncation that contradicts it.
 
-**Evidence:** three author-confirmed 🔴 on Aileaneprod/korbyx, each on a commit
-we reviewed and none of them raised. #41, a timestamp admitted by a shape regex
-that accepts impossible calendar values. #146, money accumulated in a float
-whose *intermediate* total leaves the exact-integer range although every term
-was valid. #218, a presence flag computed before a later truncation, so the
-status reported contradicts the rows returned and the result fails its own
-schema.
-
-
-## Client data hides in the prose beside the code, not in the data
-
-Fixtures and READMEs get checked, because everyone knows they hold data. What
-slips through is the sentence written next to the code: a comment recording a
-client's internal classification, a deadline they committed to, who reports to
-whom. It is versioned forever, in repositories whose own rules forbid exactly
-that. Read comments — and the pull request's own prose — for instances of the
-rule, not only the files whose job is to hold data.
-
-**Evidence:** Aileaneprod/korbyx#55. A comment recorded a pilot client's
-internal taxonomy and the date they planned to change it. We reviewed that
-commit and raised nothing. The author: *"Finding valide, corrigé, et c'est la
-deuxième fois cette semaine que je fais cette faute. La première était le nom du
-client dans les commentaires de la PR 46."* Both times the data was in prose
-attached to code, not in a file anyone would think to audit.
+**Evidence:** three author-confirmed 🔴 on korbyx, each on a commit we reviewed.
+#41, a shape regex admitting impossible dates. #146, an intermediate float total
+leaving the exact-integer range though every term was valid. #218, a presence
+flag computed before the truncation it contradicts.
