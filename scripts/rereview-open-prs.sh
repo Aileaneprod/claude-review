@@ -77,7 +77,15 @@ done
 
 [ -n "$repo" ] || die "--repo is required"
 case "$repo" in */*) ;; *) die "--repo must be OWNER/REPO (got '${repo}')" ;; esac
-case "$limit" in *[!0-9]*) die "--limit must be a whole number (got '${limit}')" ;; esac
+# The empty string holds no non-digit character, so `*[!0-9]*` lets it through,
+# and it reaches `[ "$limit" -gt 0 ]` — which bash answers with "integer
+# expected" on stderr and a false branch, i.e. silently unlimited. Third time
+# this repository has written this guard without the empty case; report.sh has
+# carried a test for it since --since.
+case "$limit" in
+  "")       die "--limit needs a whole number, got an empty value" ;;
+  *[!0-9]*) die "--limit must be a whole number (got '${limit}')" ;;
+esac
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf "$work_dir"' EXIT
