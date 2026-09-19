@@ -1,0 +1,31 @@
+# Repositories the scheduled catch-up sweeps.
+#
+# Read by scripts/rereview-all.sh, which runs scripts/rereview-open-prs.sh
+# against each one. See .github/workflows/catch-up.yml for the schedule and
+# docs/SETUP.md for the token it needs.
+#
+# Format — one repository per line, `#` comments and blank lines ignored:
+#
+#     OWNER/REPO [path to that repository's wrapper workflow]
+#
+# The second field is optional; without it the wrapper is assumed to live at
+# .github/workflows/ai-review.yml, which is where install-wrapper.sh puts it.
+#
+# Order is priority order. The pass spends a shared budget from the top down,
+# and names in the job summary whatever it did not reach.
+#
+# A repository belongs here once it is actually wired up: the catch-up reads
+# its wrapper first and fails the run if there is none, because a name in this
+# file that cannot be checked is a stale roster, and a stale roster reports
+# reassuring zeros. Removing a repository from the system means removing it
+# here too.
+
+# The repository the 2026-09-17 outage hit: four pull requests (#228-#231)
+# came back `api_error_status 429` and sat unreviewed overnight.
+Aileaneprod/korbyx
+
+# claude-review reviews its own pull requests, and its wrapper is not named
+# like everyone else's — it calls review.yml by local path, so it is
+# self-review.yml rather than ai-review.yml. The same outage swallows its
+# reviews too.
+Aileaneprod/claude-review .github/workflows/self-review.yml

@@ -590,3 +590,67 @@ One limit worth knowing: a repository whose wrapper lacks `checks: write`
 publishes no `AI review outcome` check at all, so its misses leave no trace to
 find. The script reads the wrapper first and says so rather than reporting a
 reassuring zero.
+
+### Doing that catch-up on a schedule
+
+`.github/workflows/catch-up.yml` in this repository runs that same script over
+a list of repositories every day at 06:17 UTC, so the replay happens before
+anyone notices it was needed. The list is `config/rereview-repos.txt`, one
+`OWNER/REPO [wrapper path]` per line — a repository is swept once it is in
+there, and the second field is only needed when its wrapper is not at
+`.github/workflows/ai-review.yml`.
+
+It needs a credential of its own, and that is the part to weigh before turning
+it on. `gh run rerun` needs `actions: write` on the **target** repository, and
+a workflow's own `GITHUB_TOKEN` is confined to the repository it runs in, so a
+cross-repository replay cannot use it. The secret is `REREVIEW_GITHUB_TOKEN`,
+set on `claude-review` itself:
+
+```bash
+gh secret set REREVIEW_GITHUB_TOKEN --repo Aileaneprod/claude-review
+```
+
+Mint it as a **fine-grained** PAT (Settings → Developer settings → Personal
+access tokens → Fine-grained), with *Only select repositories* listing exactly
+the names in `config/rereview-repos.txt`, and these permissions — which are the
+minimum, not a starting point:
+
+| Permission | Level | What needs it |
+|---|---|---|
+| Actions | Read and write | `gh run rerun` — the only write in the whole pass |
+| Contents | Read-only | reads each wrapper, to see whether it grants `checks: write` |
+| Pull requests | Read-only | lists the open pull requests |
+| Checks | Read-only | reads the `AI review outcome` check on each head commit |
+| Metadata | Read-only | mandatory on every fine-grained token |
+
+A classic PAT also works — `repo` (or `public_repo` for public repositories)
+covers all five — but it carries those rights on **every** repository you can
+reach, which is a far wider credential for the same job. Fine-grained tokens
+expire within a year; when one does, the daily run starts failing and its job
+summary names the secret to replace.
+
+Be clear-eyed about the trade: `actions: write` can re-run *any* workflow in
+those repositories, not only the reviewer's, and a PAT acts as the person who
+minted it. That is a standing credential for a rare event. If it is not worth
+it, leave the secret unset — the workflow stops at its first step, writes what
+is missing to the job summary, fails nothing, and you run
+`rereview-open-prs.sh` by hand after an outage as above.
+
+However it is triggered, the pass is bounded: at most 5 replays per repository
+and 10 across the run, because each replay costs a full review and quota is
+what runs out. A repository the budget did not reach is named in the job
+summary rather than quietly skipped, and so is one whose wrapper lacks
+`checks: write` — there, an unreviewed push leaves no trace at all, and a pass
+that said nothing would be reporting a clean sweep it never saw. If quota is
+still exhausted when the schedule fires, the replay fails, the pull request is
+re-marked `neutral`, and tomorrow's pass picks it up again.
+
+To run it by hand right after an outage, over the repository you already know
+about:
+
+```bash
+gh workflow run catch-up.yml --repo Aileaneprod/claude-review \
+  -f repos=Aileaneprod/korbyx -f rerun=true -f budget=6
+```
+
+Leave `rerun` off — the default — to get the list first. That costs nothing.
