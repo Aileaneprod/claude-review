@@ -61,20 +61,6 @@ the team. No ADR existed — true; the demand was still wrong.
 
 ---
 
-## A README's own caveats usually answer the objection you are about to raise
-
-When a document says something surprising, read the paragraphs around it before
-reporting it. Authors routinely pre-empt the obvious objection one paragraph
-earlier, and a finding that ignores that reads as if the reviewer skimmed.
-
-**Evidence:** Aileaneprod/korbyx#13. Two CodeRabbit 🔴 findings claimed the
-fixtures carried real client names, citing *"la forme réellement rencontrée"*.
-Six lines above, the same README states *"Aucune donnée, aucun identifiant,
-aucun nom […] d'un client réel n'entre ici."* What was declared real was the
-shape of the divergence, not the names. Neither thread was ever answered.
-
----
-
 ## A legal identifier is real until the repository shows where it came from
 
 The lesson above settles names: a name the repository declares fictional is
@@ -138,3 +124,17 @@ premise costs the author an hour and the label its credibility.
 shells run with pipefail" (they run `bash -e`; `exit 1 | tee; echo $?` → 0) and
 "`GITHUB_SHA` on `release` is the branch tip" (docs: "last commit in the tagged
 release"). Both refuted by reproduction.
+
+
+## A check is only as good as the stage it sits in
+
+Follow a validated value one stage further — to what reaches the next function,
+column or render. A check correct about the value in front of it is routinely
+wrong about the value that leaves it: a shape test standing in for a validity
+test, a range test taken at the edge the next increment crosses, a flag computed
+before the truncation that contradicts it.
+
+**Evidence:** three author-confirmed 🔴 on korbyx, each on a commit we reviewed.
+#41, a shape regex admitting impossible dates. #146, an intermediate float total
+leaving the exact-integer range though every term was valid. #218, a presence
+flag computed before the truncation it contradicts.
