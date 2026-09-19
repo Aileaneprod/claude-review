@@ -80,6 +80,28 @@ for every finding the author rejected, and a list of findings a competing
 reviewer got right that we never raised. **You** write the final wording and
 open a PR. Nothing is merged automatically.
 
+### Check the prompt does not already say it
+
+```bash
+./scripts/lesson-overlap.sh
+```
+
+For every lesson in `prompts/learnings.md`, this names the passage of `base.md`
+or of a profile that says the most similar thing — file, line, and the terms
+they share — ranked so a long paragraph cannot win on length alone. Offline, no
+model, no ledger.
+
+Run it before merging a lesson and, when the 7500-byte cap refuses a new one,
+run it to decide what leaves. Nothing in the harvest loop used to ask this
+question, and the file accreted a 703-byte restatement of a rule that `base.md`
+gives twice and `profiles/generic.md` gives by name. Six live runs of the eval
+fixture built to catch that exact mistake passed with the lesson **deleted** —
+the reviewer was following the rule from elsewhere the whole time.
+
+It ranks candidates; it does not rule. Two passages can say the same thing in
+different words and it will miss them, or share vocabulary and mean different
+things and it will point at them anyway. Read both before deleting either.
+
 ### Why it is human-gated
 
 A wrong lesson does not spoil one review. It spoils every review in every
