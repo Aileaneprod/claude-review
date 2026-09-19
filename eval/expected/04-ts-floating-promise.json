@@ -13,8 +13,8 @@
     {
       "id": "decoy-trackasync-is-handled",
       "path": "src/orders.ts",
-      "any_of": ["trackAsync", "auditLog", "void auditLog"],
-      "why": "trackAsync is explicitly marked `void` with a .catch() and a comment explaining the intent. Flagging it means the reviewer matched on 'not awaited' without reading the handler."
+      "any_of": ["in trackAsync", "trackAsync is not awaited", "trackAsync is not handled", "trackAsync is unhandled", "trackAsync is called", "await trackAsync", "auditLog", "void auditLog"],
+      "why": "trackAsync is explicitly marked `void` with a .catch() and a comment explaining the intent. Flagging it means the reviewer matched on 'not awaited' without reading the handler. `trackAsync` alone is a context line of the diff (`trackAsync(\"refund.started\", orderId);` sits three lines above the defect), so it punished the quote; `await trackAsync` is the remediation a wrong reviewer demands and appears nowhere in the code. `auditLog` and `void auditLog` are the decoy's own body, outside the diff, reachable only by quoting it."
     }
   ]
 }

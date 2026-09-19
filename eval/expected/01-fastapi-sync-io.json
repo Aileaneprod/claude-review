@@ -13,8 +13,8 @@
     {
       "id": "decoy-threadpool-is-correct",
       "path": "app/reports.py",
-      "any_of": ["fetch_logo", "run_in_threadpool", "threadpool"],
-      "why": "fetch_logo already dispatches the sync requests call to a threadpool; flagging it means the reviewer pattern-matched on `requests` without reading the wrapper."
+      "any_of": ["in fetch_logo", "fetch_logo is not", "fetch_logo is blocking", "fetch_logo is synchronous", "fetch_logo blocks", "function fetch_logo", "run_in_threadpool"],
+      "why": "fetch_logo already dispatches the sync requests call to a threadpool; flagging it means the reviewer pattern-matched on `requests` without reading the wrapper. Every keyword pairs the site with a predicate, so only prose about fetch_logo can produce one — code always writes `fetch_logo(`. Bare `fetch_logo` failed the correct finding instead, whose evidence opens on `logo = await fetch_logo(user.tenant_id)`, the first line of the defective function. `run_in_threadpool` stays — it appears only in the decoy's own body, outside the diff, so only a reviewer that went and quoted the decoy can produce it. Bare `threadpool` is gone: it is the correct finding's own remedy vocabulary."
     }
   ]
 }

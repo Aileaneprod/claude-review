@@ -13,8 +13,8 @@
     {
       "id": "decoy-sort-column-allowlisted",
       "path": "api/search.py",
-      "any_of": ["list_products", "sort_by", "ORDER BY", "SortDirection"],
-      "why": "sort_by is validated against SORT_COLUMNS and raises before reaching the query; direction is an Enum with two fixed values. The f-string is safe because neither value can be attacker-controlled."
+      "any_of": ["in list_products", "list_products is vulnerable", "list_products is injectable", "sort_by is not", "sort_by is interpolated", "unvalidated sort_by", "ORDER BY"],
+      "why": "sort_by is validated against SORT_COLUMNS and raises before reaching the query; direction is an Enum with two fixed values. The f-string is safe because neither value can be attacker-controlled. The decoy's signature is a context line of the diff, so `list_products`, `sort_by` and `SortDirection` all fired on an evidence quote that reached the top of the hunk. `ORDER BY` stays: the interpolated ORDER BY line is outside the diff and the correct finding, which is about a LIKE clause, has no reason to quote it."
     }
   ]
 }

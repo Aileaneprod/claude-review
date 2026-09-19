@@ -13,8 +13,8 @@
     {
       "id": "decoy-guarded-create-statements",
       "path": "migrations/0042_archive_stale_accounts.sql",
-      "any_of": ["IF NOT EXISTS", "CREATE INDEX", "CREATE TABLE", "idx_accounts_last_seen"],
-      "why": "Both CREATE statements already use IF NOT EXISTS and are safe to re-run. Flagging them as non-idempotent means the reviewer did not read the guard it is complaining about the absence of."
+      "any_of": ["add if not exists", "missing if not exists", "no if not exists", "without if not exists", "unguarded create", "index already exists", "table already exists", "create index will fail", "create table will fail"],
+      "why": "Both CREATE statements already use IF NOT EXISTS and are safe to re-run. Flagging them as non-idempotent means the reviewer did not read the guard it is complaining about the absence of. This is the entry that failed the gate on 2026-08-05 and 2026-09-18: the whole migration is an added file, so every keyword here was a quote of it, and an evidence block that reached up from the DELETE to the CREATE statements scored the right answer as a decoy hit. Each keyword now demands the guard that is already there. None is the bare word 'idempotent' — the real defect IS non-idempotent and must_find matches on 'idempoten', so that word cannot separate the two claims; only the demand for IF NOT EXISTS can."
     }
   ]
 }

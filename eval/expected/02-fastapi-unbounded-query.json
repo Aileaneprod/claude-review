@@ -13,8 +13,8 @@
     {
       "id": "decoy-list-events-is-bounded",
       "path": "app/admin.py",
-      "any_of": ["list_events", "db.events.find", "max_page_size"],
-      "why": "list_events is bounded by Query(ge=1, le=settings.max_page_size) and .limit(limit); flagging it means the reviewer did not read the parameter validation."
+      "any_of": ["in list_events", "list_events is unbounded", "list_events is not bounded", "list_events has no limit", "list_events lacks", "events endpoint is unbounded"],
+      "why": "list_events is bounded by Query(ge=1, le=settings.max_page_size) and .limit(limit); flagging it means the reviewer did not read the parameter validation. The whole decoy sits in the diff as context, so every identifier in it — `list_events`, `db.events.find`, `max_page_size` — was a string the correct finding could quote while showing the hunk it is right about. Only a claim about the decoy distinguishes the two."
     }
   ]
 }

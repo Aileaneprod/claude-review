@@ -6,14 +6,14 @@
     {
       "id": "decoy-float-rounding",
       "path": "src/pricing.ts",
-      "any_of": ["float", "rounding", "precision", "Math.round", "integer arithmetic"],
-      "why": "All arithmetic is in integer minor units and inputs are checked with Number.isInteger. There is no precision bug to report."
+      "any_of": ["float", "rounding", "precision", "integer arithmetic", "loses cents"],
+      "why": "All arithmetic is in integer minor units and inputs are checked with Number.isInteger. There is no precision bug to report. `Math.round` was dropped: it is the changed line itself, so it identified the code rather than the claim. Nothing is lost — a reviewer that invents a rounding bug says 'rounding' or 'precision', which are already here and are prose."
     },
     {
       "id": "decoy-missing-validation",
       "path": "src/pricing.ts",
-      "any_of": ["validation", "unvalidated", "bounds", "negative", "RangeError"],
-      "why": "Both parameters are range-checked and throw on bad input. Claiming validation is missing means the reviewer did not read the guards."
+      "any_of": ["validation", "unvalidated", "bounds", "allows negative", "negative input", "no range check", "not range-checked"],
+      "why": "Both parameters are range-checked and throw on bad input. Claiming validation is missing means the reviewer did not read the guards. `negative` matched the guard's own message ('must be a non-negative integer') and `RangeError` matched the guard itself, so both fired on a quote of the code that disproves the claim — the exact inversion this entry is for. The replacements assert the absence a wrong reviewer alleges."
     },
     {
       "id": "decoy-any-finding-at-all",
