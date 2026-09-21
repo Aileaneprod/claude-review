@@ -124,6 +124,25 @@ jobs:
       # the draft has been reviewed on every push, that event only buys a second
       # review of a commit already reviewed.
       # review_drafts: true
+
+      # Uncomment ONLY on a public repository, and only deliberately. A private
+      # repository already archives the reviewer's execution trace — the prompt,
+      # the diff, the text of every file it read, and the Linear ticket where
+      # one was fetched — for 90 days, and that archive is as private as the
+      # repository.
+      #
+      # On a PUBLIC repository the same archive is downloadable by anyone with a
+      # free GitHub account: the artifact takes the CALLER's visibility, because
+      # a reusable workflow's jobs run inside the caller's run. Measured against
+      # an unrelated public repository on 2026-09-18 — the listing endpoint
+      # answers with no token at all, and the zip comes back to any ordinary
+      # personal token. Actions redacts secrets from logs, not from artifacts.
+      #
+      # So it is off by default and turning it on is a publication decision. It
+      # lives here rather than in `.claude-review.yml` for the same reason:
+      # a decision about publishing this repository's prompts and tickets must
+      # not sit in a file this repository's own pull requests can edit.
+      # archive_public_trace: true
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       # Optional. With it, the reviewer reads the Linear ticket this pull

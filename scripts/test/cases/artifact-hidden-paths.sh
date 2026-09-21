@@ -18,8 +18,12 @@
 
 it "keeps an artifact whose path is hidden"
 
+# Takes the tree to scan, defaulting to this repository. Parameterised so the
+# same scanner can be pointed at a synthetic workflow: a case that only ever
+# runs over files that already comply cannot tell "found nothing wrong" from
+# "cannot see anything".
 _hidden_uploads_without_the_flag() {
-  python3 - "$(cd -- "$SCRIPTS/.." && pwd)" <<'PY'
+  python3 - "${1:-$(cd -- "$SCRIPTS/.." && pwd)}" <<'PY'
 import io
 import os
 import re
@@ -36,7 +40,16 @@ for name in sorted(os.listdir(os.path.join(root, ".github", "workflows"))):
 
     # Each `uses: actions/upload-artifact` and the `with:` block under it, up to
     # the next step (a line at the same indent starting with `- `) or the end.
-    for match in re.finditer(r"^(\s*)uses:\s*actions/upload-artifact@", text, re.M):
+    #
+    # Four YAML spellings are valid and the first version of this pattern saw
+    # ONE of them. `uses: "actions/..."` is quoted, `- uses: actions/...` puts
+    # the step's dash on the same line, and the two combine. A guard that reads
+    # three of four shapes as "no artifact step here" reports a clean repository
+    # for the same reason the step it was written to catch reported a clean
+    # upload: it did not look. The other reviewer caught the quoted form on the
+    # pull request that added this file; the dash forms turned up on checking it.
+    for match in re.finditer(r"""^(\s*)-?\s*uses:\s*['"]?actions/upload-artifact@""",
+                             text, re.M):
         start = match.end()
         rest = text[start:]
         stop = re.search(r"^\s*- (?:name|uses):", rest, re.M)
@@ -97,3 +110,35 @@ printf '          path: ${{ steps.claude.outputs.execution_file }}\n' \
   > "$TESTTMP/upload-expr.yml"
 assert_equal "hidden=False flagged=False offender=False" "$(_probe "$TESTTMP/upload-expr.yml")" \
   "an expression is not read as a hidden path"
+
+# --- the scanner has to see every spelling of `uses:` ------------------------
+#
+# YAML accepts four, and the first version of this pattern read one. A guard
+# blind to `uses: "actions/..."` or to `- uses: actions/...` answers "no
+# artifact step here" and reports a clean repository — the same way the step it
+# exists to catch reported a clean upload. It did not look.
+#
+# Runs the REAL scanner over a synthetic tree, not a copy of its regex: a copy
+# would keep passing while the workflow's own pattern stayed blind.
+
+it "sees an upload step however its uses: line is spelled"
+
+_forms_tree() {
+  local root="$TESTTMP/uses-forms"
+  rm -rf "$root"; mkdir -p "$root/.github/workflows"
+  {
+    printf 'jobs:\n  j:\n    steps:\n'
+    printf '      - name: plain\n        uses: actions/upload-artifact@v4\n'
+    printf '        with:\n          path: a/.out/\n'
+    printf '      - name: quoted\n        uses: "actions/upload-artifact@v4"\n'
+    printf '        with:\n          path: b/.out/\n'
+    printf "      - uses: actions/upload-artifact@v4\n"
+    printf '        with:\n          path: c/.out/\n'
+    printf "      - uses: 'actions/upload-artifact@v4'\n"
+    printf '        with:\n          path: d/.out/\n'
+  } > "$root/.github/workflows/four.yml"
+  printf '%s' "$root"
+}
+
+_seen() { _hidden_uploads_without_the_flag "$(_forms_tree)" | tr ' ' '\n' | grep -c 'four.yml' || true; }
+assert_equal "4" "$(_seen)" "all four spellings are inspected, not just the bare one"

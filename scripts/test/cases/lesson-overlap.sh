@@ -142,3 +142,42 @@ anything the ledger's harvest recorded as one.
 EOF
 assert_contains "prompts/base.md:3" "the restatement still wins" -- _run
 assert_not_contains "documented, enumerate" "the long bag of words does not" -- _run
+
+# --- three defects the other reviewer found, after this file was merged -------
+#
+# All three were in the first version, and all three are the same shape as the
+# bugs this repository spent two days removing from its own measurements: an
+# input check that admits the value it exists to reject, a threshold applied
+# after the decision instead of before it, and a missing state reported as a
+# clean answer.
+
+it "refuses an empty threshold instead of crashing on it"
+# `*[!0-9]*` admits the empty string — it holds no non-digit character — and the
+# empty string reached int("") and a python traceback. report.sh already carried
+# a case for exactly this on --since.
+assert_contains "empty value" "an empty --min-overlap is named, not traced back" -- \
+  "$_LO" --min-overlap ""
+assert_not_contains "Traceback" "and python is never the one reporting it" -- \
+  "$_LO" --min-overlap ""
+
+it "applies the threshold before the ranking, not after the winner is picked"
+# The bug: rank everything on Jaccard, then test the winner against the
+# threshold. A two-term passage with a high score beat a three-term passage with
+# a low one, was rejected at three, and the tool answered "nothing comes close"
+# while a qualifying passage sat in the corpus — under-reporting, which is the
+# one direction this tool must not fail in.
+rm -rf "$_ROOT"; mkdir -p "$_ROOT/prompts"
+printf '# Base\n\nalpha bravo\n\nalpha bravo charlie kilo lima mike november oscar\n' \
+  > "$_ROOT/prompts/base.md"
+printf '# L\n\n## Test\n\nalpha bravo charlie delta echo.\n' > "$_ROOT/learn.md"
+_run3() { "$_LO" --learnings "$_ROOT/learn.md" --prompts "$_ROOT/prompts" --min-overlap 3 2>&1; }
+assert_contains "3 shared term(s)" "the qualifying passage is found" -- _run3
+assert_not_contains "nothing in the prompt comes close" \
+  "and a higher-scoring passage below the threshold does not hide it" -- _run3
+
+it "says a corpus is empty rather than calling it no overlap"
+rm -rf "$_ROOT"; mkdir -p "$_ROOT/prompts"
+printf '# L\n\n## Test\n\nalpha bravo charlie delta echo.\n' > "$_ROOT/learn.md"
+_run4() { "$_LO" --learnings "$_ROOT/learn.md" --prompts "$_ROOT/prompts" 2>&1; }
+assert_contains "nothing to compare against" "an empty prompt is a configuration error" -- _run4
+assert_not_contains "Traceback" "and not an unpacked None" -- _run4

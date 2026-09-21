@@ -56,7 +56,14 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-case "$min_overlap" in *[!0-9]*) die "--min-overlap must be a whole number (got '${min_overlap}')" ;; esac
+# `*[!0-9]*` alone admits the EMPTY string — it holds no non-digit character —
+# and the empty string reaches int("") and a python traceback where a caller
+# expects one diagnostic line. report.sh already carries a case for exactly this
+# on --since; this script repeated the mistake weeks later.
+case "$min_overlap" in
+  "")       die "--min-overlap needs a whole number, got an empty value" ;;
+  *[!0-9]*) die "--min-overlap must be a whole number (got '${min_overlap}')" ;;
+esac
 [ -f "$learnings" ]   || die "no learnings file at ${learnings}"
 [ -d "$prompts_dir" ] || die "no prompts directory at ${prompts_dir}"
 
@@ -132,6 +139,15 @@ if not lessons:
     print("No lessons in %s." % learnings_path)
     raise SystemExit(0)
 
+# A prompts directory that exists and holds no readable paragraph is a
+# configuration mistake, not an absence of overlap. Left unsaid, the loop below
+# unpacked None; said as "nothing comes close", it would be the lie this whole
+# tool exists to stop telling — an answer that sounds like a measurement and is
+# the absence of one.
+if not corpus:
+    print("No passages found under %s — nothing to compare against." % prompts_dir)
+    raise SystemExit(0)
+
 print("# Does the prompt already say it?")
 print()
 print("%d lesson(s) against %d passage(s) of base.md and the profiles."
@@ -145,18 +161,26 @@ for title, lesson_terms in lessons:
     # passage of base.md the "closest" match to three unrelated lessons at once.
     # The count is still what --min-overlap gates on, because a ratio is not a
     # quantity a person can reason about when deciding whether to delete a rule.
-    best = None
+    # The threshold filters CANDIDATES, before the ranking — not the winner
+    # after it. Ranked first and filtered second, a two-term passage with a high
+    # Jaccard beat a three-term passage with a low one, was then rejected
+    # against a threshold of three, and the tool answered "nothing in the prompt
+    # comes close" while a qualifying passage sat in the corpus. Reported by the
+    # other reviewer on the pull request that introduced this file.
+    eligible, widest = [], 0
     for path, line_no, para, para_terms in corpus:
         shared = lesson_terms & para_terms
+        widest = max(widest, len(shared))
+        if len(shared) < min_overlap:
+            continue
         union = lesson_terms | para_terms
-        score = len(shared) / len(union) if union else 0.0
-        if best is None or score > best[0]:
-            best = (score, shared, path, line_no, para)
-    score, shared, path, line_no, para = best
-    if len(shared) < min_overlap:
+        eligible.append((len(shared) / len(union) if union else 0.0,
+                         shared, path, line_no, para))
+    if not eligible:
         print("## %s\n\n  nothing in the prompt comes close (best: %d shared term(s))\n"
-              % (title, len(shared)))
+              % (title, widest))
         continue
+    score, shared, path, line_no, para = max(eligible, key=lambda e: e[0])
     flagged += 1
     first = " ".join(para.split())[:150]
     print("## %s" % title)
