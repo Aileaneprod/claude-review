@@ -250,7 +250,7 @@ input breaks it — a comment could not enforce this, and did not.
 
 ## Choosing a model and an effort
 
-Both are pinned in `config/defaults.yml`: `model: claude-opus-5-5`,
+Both are pinned in `config/defaults.yml`: `model: claude-opus-5`,
 `effort: xhigh`. They become `--model` and `--effort` inside `claude_args` —
 the action has no `model` input; that was removed, along with `max_turns`,
 `allowed_tools`, and the other former top-level inputs.
@@ -265,11 +265,19 @@ commit here. Measured on 2026-09-22, that default was `claude-sonnet-5`.
 multi-agent orchestration that comes with it has no meaning for an unattended
 review. `resolve-config.sh` refuses `ultra` by name and says which level was
 meant, rather than letting the CLI reject it on every review. Left empty, the
-effort is the model's own default, which on `claude-opus-5-5` is `medium`.
+effort is the model's own default, which on `claude-opus-5` is `high`.
 
-**What it costs.** `claude-opus-5-5` is twice `claude-sonnet-5` per token ($4 /
-$20 per MTok against $2 / $10), and `xhigh` thinks more per turn than the
-default. Reviews run on a subscription whose weekly limit was reached on
+**The model must be one the PRODUCTION CLI knows, not the newest one.**
+`claude-code-action@v1` pins Claude Code 2.1.278, and that CLI rejects
+`claude-opus-5-5` before sending anything (`unrecognized_model`). Measured on
+2026-09-23, on every fixture of the live eval, after a local 2.1.280 had
+accepted it without complaint. A model the pinned CLI does not know does not
+make reviews worse; it makes every review fail. So before changing `model`, run
+the live eval (`.github/workflows/eval.yml`, `live: true`): it passes the
+configured model and effort, on the same pinned CLI, and says so in its log.
+
+**What it costs.** Opus costs more per token than Sonnet, and `xhigh` thinks
+more per turn than the default. Reviews run on a subscription whose weekly limit was reached on
 2026-09-17 and again on 2026-09-22 at the old settings, so expect it sooner.
 In order, the levers are:
 

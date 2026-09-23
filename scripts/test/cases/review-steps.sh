@@ -176,7 +176,7 @@ box="$(_sandbox args-defaults)"
 mkdir -p "$box/repo"
 "$SCRIPTS/resolve-config.sh" --repo-root "$box/repo" > "$box/temp/config.json"
 _run_step args "$box"
-assert_equal "claude-opus-5-5" "$(_after "$box" --model)" "the default model reaches the CLI"
+assert_equal "claude-opus-5" "$(_after "$box" --model)" "the default model reaches the CLI"
 assert_equal "xhigh" "$(_after "$box" --effort)" "the default effort reaches the CLI"
 
 # --- python in the pull request's working directory ----------------------------
