@@ -44,7 +44,11 @@ jobs:
       # drives the `claude` CLI directly, which has to come from somewhere.
       - name: Install the Claude Code CLI
         if: inputs.live
-        run: npm install -g @anthropic-ai/claude-code
+        # Pinned to the version claude-code-action@v1 installs for real reviews
+        # (`claudeCodeVersion` in its src/entrypoints/run.ts). An eval on a
+        # newer CLI than production can pass on a flag or a default production
+        # does not have. Move the two together.
+        run: npm install -g @anthropic-ai/claude-code@2.1.278
 
       - name: Run the harness
         env:

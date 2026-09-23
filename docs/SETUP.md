@@ -285,6 +285,50 @@ for the ones that don't.
 *recipe*; it never shares the *credential*. Every repo that wants a review
 needs its own copy of this secret, set via 3a/3b/3c above.
 
+### 3f. A fallback token, so a usage limit is not an outage (optional)
+
+The subscription behind `CLAUDE_CODE_OAUTH_TOKEN` reached its weekly limit on
+2026-09-17 and again on 2026-09-22, and every review in every repository
+stopped until it reset. A second token turns that into a non-event:
+
+```bash
+claude setup-token          # logged in as a DIFFERENT Claude account
+gh secret set CLAUDE_CODE_OAUTH_TOKEN_FALLBACK --repo OWNER/REPO
+# or, org-wide:
+gh secret set CLAUDE_CODE_OAUTH_TOKEN_FALLBACK --org Aileaneprod --visibility all
+```
+
+Then pass it from the repo's `.github/workflows/ai-review.yml`, by name like the
+first one — `templates/wrapper.yml` already carries the line:
+
+```yaml
+      CLAUDE_CODE_OAUTH_TOKEN_FALLBACK: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK }}
+```
+
+A wrapper that does not pass it keeps working exactly as before, without a
+fallback. Under App mode the wrapper must be identical to the copy on the
+default branch, so the line only takes effect once it is merged there.
+
+Three things to know:
+
+- **It must come from another subscription.** The limit belongs to the account,
+  not to the token: two tokens minted from one account run out together, and
+  the fallback would retry into the same refusal.
+- **It is used only when the first attempt did nothing.** The retry happens
+  when the first token is refused — `429` for a usage limit, `401`/`403` for a
+  rejected credential — on its first turn, at zero cost. A limit that arrives
+  halfway through a review is *not* retried: inline comments post the moment
+  they are made, so a second run would post the same findings twice.
+  `scripts/should-fall-back.sh` owns that decision and explains it in its
+  header.
+- **A run that used it says so**, with a warning annotation and a line in the
+  job summary. Once is a usage limit. On every run, it means the first token has
+  expired or been revoked — tokens last a year — and the fallback is quietly
+  carrying all the load until its own quota runs out too. Replace the first
+  token (steps 2 and 3). If the fallback is refused as well, the "AI review
+  unavailable" notice names the secret that was refused — the fallback's, not
+  the first one, which was only the reason for the retry.
+
 ---
 
 ## Step 4 — Install the Claude GitHub App
@@ -468,6 +512,8 @@ problem.
 
 Before this works on that repo, it also needs:
 - **The secret** from step 3 (`gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo ...`)
+- **Optionally, the fallback secret** from step 3f, from another subscription, and
+  the wrapper line that passes it
 - **The GitHub App** from step 4 installed on that repo
 - **The wrapper on the default branch**, per the section directly above
 - **Actions minutes available on the account that owns the repo.** Private
@@ -538,7 +584,7 @@ config/defaults.yml  <  workflow inputs  <  that repo's own .claude-review.yml
 | Review job doesn't run at all | The PR is a draft, its author is a bot, it has the `skip-ai-review` label, or it's from a fork | Expected behavior — see "When nothing happens" below |
 | Comment says "AI review skipped — pull request from a fork" | Expected — forks never get secrets, by GitHub design, so it can't authenticate. Review it manually. |
 | Comment says "AI review unavailable" / step fails immediately | `CLAUDE_CODE_OAUTH_TOKEN` missing on that repo, or the token expired (they last a year) | Redo step 2 (mint a new one) and step 3 (re-set the secret on that repo) |
-| Several PRs go "AI review unavailable" within the same few hours, across repos | The subscription behind the token has hit its **usage limit**. The job summary says `api_error_status 429`, `terminal_reason api_error` — a 401 by contrast means the token itself | Wait for the limit to reset (or use a token on another subscription), then catch up the PRs it skipped: see "Catching up after an outage" below |
+| Several PRs go "AI review unavailable" within the same few hours, across repos | The subscription behind the token has hit its **usage limit**. The job summary says `api_error_status 429`, `terminal_reason api_error` — a 401 by contrast means the token itself | Set a fallback token on another subscription (step 3f) so the next limit is covered. For the PRs this one skipped: wait for the reset, then see "Catching up after an outage" below |
 | Runs, finishes, but posts nothing at all | Check the Actions run's **Summary** tab first — it usually explains why (e.g. every changed file was excluded, or the App isn't installed) | Reread the job summary; if genuinely blank, that can also just mean the PR had nothing to flag |
 | Review didn't happen, but the check is green and no grey `AI review outcome` check appeared | That repo's wrapper doesn't grant `checks: write` | Add `checks: write` to the `permissions:` block of its `.github/workflows/ai-review.yml`; the run's Summary tab says so too |
 | Reviewer runs but can't post comments | `permissions:` block missing from that repo's wrapper file | Compare against [`templates/wrapper.yml`](../templates/wrapper.yml) and fix |

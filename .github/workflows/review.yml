@@ -20,9 +20,19 @@ on:
         default: ""
       model:
         description: >-
-          Model ID. Empty means let claude-code-action pick its own default,
-          which is almost always right. Model IDs change — read the current ones
-          from the Claude Code docs rather than pinning one from memory.
+          Model ID or alias. The value lives in config/defaults.yml, which pins
+          it — see the comment there for why an empty default stopped being
+          neutral. This input defaults to EMPTY on purpose: GitHub substitutes
+          an omitted input's default, and anything this workflow emits shadows
+          the central file.
+        type: string
+        default: ""
+      effort:
+        description: >-
+          Reasoning effort: low, medium, high, xhigh, max. The value lives in
+          config/defaults.yml. Empty here for the same reason as `model`.
+          Validated by resolve-config.sh, because it becomes a command-line
+          argument.
         type: string
         default: ""
       max_turns:
@@ -121,6 +131,15 @@ on:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: "Claude Code OAuth token from `claude setup-token`."
         required: true
+      CLAUDE_CODE_OAUTH_TOKEN_FALLBACK:
+        description: >-
+          Optional. A second Claude Code OAuth token, used ONLY when the first
+          was refused before the review did any work — a usage limit (429) or a
+          rejected credential (401/403) on the first turn, at zero cost. It is
+          useless unless it belongs to a DIFFERENT subscription: two tokens from
+          one account share one weekly limit and hit it together. Absent, the
+          review behaves exactly as before this input existed.
+        required: false
       LINEAR_API_KEY:
         description: >-
           Optional. A Linear API key with read access, used to put the ticket a
@@ -178,8 +197,8 @@ jobs:
     # `python3 -` and `python3 -c` — the form of nearly every python call in
     # this file and in scripts/ — put that directory FIRST on sys.path. A pull
     # request adding a `json.py` at its root then runs its own code inside
-    # steps that hold GH_TOKEN, and can rewrite the model AFTER
-    # resolve-config.sh has checked it, handing the reviewer a flag of its
+    # steps that hold GH_TOKEN, and can rewrite the model or effort AFTER
+    # resolve-config.sh has checked them, handing the reviewer a flag of its
     # choosing. PYTHONSAFEPATH (python 3.11+; ubuntu-latest ships 3.12) drops
     # that entry. No script here imports a module of its own, so nothing
     # depends on it. scripts/test/cases/review-steps.sh plants the `json.py`.
@@ -288,6 +307,7 @@ jobs:
         env:
           IN_PROFILE: ${{ inputs.profile }}
           IN_MODEL: ${{ inputs.model }}
+          IN_EFFORT: ${{ inputs.effort }}
           IN_MAX_TURNS: ${{ inputs.max_turns }}
           IN_MAX_FINDINGS: ${{ inputs.max_findings }}
           IN_MAX_DIFF_LINES: ${{ inputs.max_diff_lines }}
@@ -627,6 +647,7 @@ jobs:
         run: |
           set -euo pipefail
           model="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$RUNNER_TEMP/config.json")"
+          effort="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("effort",""))' "$RUNNER_TEMP/config.json")"
           turns="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("max_turns",60))' "$RUNNER_TEMP/config.json")"
 
           # Read and comment only. No Edit, no Write, no unrestricted Bash — the
@@ -642,15 +663,18 @@ jobs:
           {
             printf 'value<<CLAUDE_ARGS_EOF\n'
             printf -- '--max-turns %s\n' "$turns"
-            # The model is shape-checked by resolve-config.sh before it reaches
-            # this line. claude-code-action tokenises claude_args with
-            # shell-quote, and the value comes from a file the pull request
-            # under review can edit, so an unchecked one could carry a second
-            # argument. Checked once, at the place the value is resolved — and
-            # read back above with the job's PYTHONSAFEPATH set, so a `json.py`
-            # in the pull request cannot rewrite it between the two.
             if [ -n "$model" ]; then
               printf -- '--model %s\n' "$model"
+            fi
+            # Both values are shape-checked by resolve-config.sh before they
+            # reach this line. claude-code-action tokenises claude_args with
+            # shell-quote, and both come from a file the pull request under
+            # review can edit, so an unchecked value could carry a second
+            # argument. Checked once, at the place the value is resolved — and
+            # read back above with the job's PYTHONSAFEPATH set, so a `json.py`
+            # in the pull request cannot rewrite them between the two.
+            if [ -n "$effort" ]; then
+              printf -- '--effort %s\n' "$effort"
             fi
             printf -- '--allowedTools "%s"\n' "$tools"
             printf 'CLAUDE_ARGS_EOF\n'
@@ -707,6 +731,104 @@ jobs:
           github_token: ${{ !inputs.use_github_app && github.token || '' }}
           prompt: ${{ steps.prompt.outputs.text }}
           claude_args: ${{ steps.args.outputs.value }}
+
+      # FALLBACK CREDENTIAL. The subscription behind the first token reached its
+      # weekly limit on 2026-09-17 and again on 2026-09-22, and every review in
+      # every repository stopped until it reset. A second token on another
+      # subscription makes that a non-event.
+      #
+      # should-fall-back.sh owns the decision, and it is deliberately narrow:
+      # retry only when the first attempt was refused on its first turn at zero
+      # cost, with a status another account can cure. A review is not
+      # idempotent — inline comments post the moment they are made — so a limit
+      # that arrives halfway through is NOT retried: a second run would post the
+      # same findings twice and spend a second account doing it. The script's
+      # header carries the full argument.
+      #
+      # `secrets` is not available in an `if:`, and the secret itself has no
+      # business in this step: it runs after the pull request's checkout, in its
+      # working directory. The expression turns presence into `yes` or `no`
+      # before the step starts, so only that word crosses into it.
+      - name: Decide whether to retry on the fallback credential
+        id: fallback
+        if: steps.scope.outputs.has_files == 'true'
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          FALLBACK_AVAILABLE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK != '' && 'yes' || 'no' }}
+        run: |
+          set -euo pipefail
+          # One write, at the end. A step that dies before it leaves the output
+          # unset, and the `if:` below compares it to 'yes' — so dying can only
+          # ever mean no retry.
+          .claude-review-tooling/scripts/should-fall-back.sh \
+            --execution-file "${EXECUTION_FILE:-}" \
+            --decision-out "$RUNNER_TEMP/fallback-decision" \
+            --fallback-available "${FALLBACK_AVAILABLE:-no}" || true
+          use=no
+          if [ "$(cat "$RUNNER_TEMP/fallback-decision" 2>/dev/null || true)" = yes ]; then
+            # Both attempts write the SAME file: claude-code-action names it
+            # $RUNNER_TEMP/claude-execution-output.json, fixed, and an attempt
+            # that dies before it starts reports whatever is already at that
+            # path as its own record. Moved aside, the first attempt's refusal
+            # cannot pass for the second attempt's. If it cannot be moved, the
+            # retry does not happen.
+            if mv "$EXECUTION_FILE" "$RUNNER_TEMP/claude-execution-output.primary.json"; then
+              use=yes
+            fi
+          fi
+          echo "use=${use}" >> "$GITHUB_OUTPUT"
+
+      # Identical to the step above in every input but the credential. Same
+      # prompt, same claude_args, same timeout and the same continue-on-error —
+      # the fallback is a second attempt at the SAME review, not a different one.
+      - name: Review (fallback credential)
+        id: claude_fallback
+        if: steps.fallback.outputs.use == 'yes'
+        continue-on-error: true
+        timeout-minutes: 30
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK }}
+          github_token: ${{ !inputs.use_github_app && github.token || '' }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: ${{ steps.args.outputs.value }}
+
+      # One answer to "which attempt counts", read by every step below. Four
+      # steps used to name `steps.claude` directly; pointing each of them at a
+      # choice made here means none of them can pick differently from another.
+      #
+      # Once the retry has run, the retry is what counts — whatever it left.
+      # One that left no record, killed by its timeout or dead before it
+      # started, gives an empty file, and the steps below then say the neutral
+      # "did not complete". Reading the first attempt's refusal instead would
+      # announce "not reviewed: usage limit" over findings the retry may
+      # already have posted.
+      - name: Resolve the review that counts
+        id: review_result
+        if: steps.scope.outputs.has_files == 'true'
+        env:
+          RETRIED: ${{ steps.fallback.outputs.use }}
+          PRIMARY: ${{ steps.claude.outputs.execution_file }}
+          FALLBACK: ${{ steps.claude_fallback.outputs.execution_file }}
+        run: |
+          set -euo pipefail
+          if [ "${RETRIED:-}" = yes ]; then
+            file=""
+            if [ -n "${FALLBACK:-}" ] && [ -f "$FALLBACK" ]; then
+              file="$FALLBACK"
+            fi
+            echo "execution_file=${file}" >> "$GITHUB_OUTPUT"
+            echo "credential=fallback" >> "$GITHUB_OUTPUT"
+            # Loud on purpose. A fallback that works hides the reason it was
+            # needed: an EXPIRED first token (401) would be covered on every
+            # review, silently, until the fallback's own quota ran out too.
+            echo "::warning title=Review retried on the fallback credential::CLAUDE_CODE_OAUTH_TOKEN was refused before doing any work (the decision step above logs the status), so the review was run again on CLAUDE_CODE_OAUTH_TOKEN_FALLBACK. Once is a usage limit; on every run it means the first token is exhausted or expired and needs replacing."
+            printf '> [!WARNING]\n> The first credential was refused before doing any work, so this review was run again on `CLAUDE_CODE_OAUTH_TOKEN_FALLBACK`.\n' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "execution_file=${PRIMARY:-}" >> "$GITHUB_OUTPUT"
+            echo "credential=primary" >> "$GITHUB_OUTPUT"
+          fi
 
       # The evidence. `execution_file` is the only record of what the reviewer
       # actually DID: the result record, the turn count, the tools it was
@@ -779,7 +901,7 @@ jobs:
       # the reviewer's outcome. A storage quota, a name collision, an outage in
       # the upload API: all of them are a red line in the log and nothing else.
       - name: Archive the reviewer's execution trace
-        if: steps.scope.outputs.has_files == 'true' && steps.claude.outputs.execution_file != '' && (github.event.repository.private || inputs.archive_public_trace)
+        if: steps.scope.outputs.has_files == 'true' && steps.review_result.outputs.execution_file != '' && (github.event.repository.private || inputs.archive_public_trace)
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -789,7 +911,7 @@ jobs:
           # fails, and with `overwrite` instead it would delete the failed
           # attempt's trace, which is the one that explains anything.
           name: claude-review-execution-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
-          path: ${{ steps.claude.outputs.execution_file }}
+          path: ${{ steps.review_result.outputs.execution_file }}
           retention-days: 90
           if-no-files-found: ignore
 
@@ -816,7 +938,7 @@ jobs:
         if: steps.scope.outputs.has_files == 'true'
         continue-on-error: true
         env:
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          EXECUTION_FILE: ${{ steps.review_result.outputs.execution_file }}
         run: |
           set -euo pipefail
           # Written BEFORE the script runs. Everything this workflow cannot
@@ -843,7 +965,7 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          EXECUTION_FILE: ${{ steps.review_result.outputs.execution_file }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -903,10 +1025,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          EXECUTION_FILE: ${{ steps.review_result.outputs.execution_file }}
           VERDICT: ${{ steps.verdict.outputs.value }}
+          CREDENTIAL: ${{ steps.review_result.outputs.credential }}
         run: |
           set -euo pipefail
+
+          # The status below comes from the attempt that counted, so the secret
+          # it names has to be that attempt's. After a retry, a 401 is the
+          # FALLBACK's token, and telling a maintainer to replace the first one
+          # — which was only rate-limited — sends them to rotate the wrong
+          # secret while the broken one stays broken.
+          secret_name=CLAUDE_CODE_OAUTH_TOKEN
+          after_retry=""
+          if [ "${CREDENTIAL:-}" = fallback ]; then
+            secret_name=CLAUDE_CODE_OAUTH_TOKEN_FALLBACK
+            after_retry=", after \`CLAUDE_CODE_OAUTH_TOKEN\` had already been refused and the review was retried on the fallback"
+          fi
 
           # The action's own failure message is often just
           # "result is_error:true", which says nothing actionable. The execution
@@ -962,14 +1097,14 @@ jobs:
           cause_headline=""
           case "$api_status" in
             429)
-              cause="the subscription behind the reviewer's credential has hit its usage limit, so Anthropic refused the request (HTTP 429)"
+              cause="the subscription behind \`$secret_name\` has hit its usage limit, so Anthropic refused the request (HTTP 429)$after_retry"
               recourse="Nothing is lost: push again, or re-run this workflow, once the limit resets, and this code gets reviewed then."
               cause_headline="AI review unavailable — the reviewer's usage limit is reached"
               ;;
             401|403)
-              cause="Anthropic rejected the reviewer's credential (HTTP $api_status), which means the \`CLAUDE_CODE_OAUTH_TOKEN\` secret this workflow authenticates with is expired or not authorised for this use"
+              cause="Anthropic rejected the reviewer's credential (HTTP $api_status), which means the \`$secret_name\` secret this workflow authenticates with is expired or not authorised for this use$after_retry"
               recourse="A maintainer has to regenerate that token and update the secret; there is nothing to change on this pull request."
-              cause_headline="AI review unavailable — CLAUDE_CODE_OAUTH_TOKEN was rejected"
+              cause_headline="AI review unavailable — $secret_name was rejected"
               ;;
             5[0-9][0-9])
               cause="Anthropic's API returned a server error (HTTP $api_status)"
