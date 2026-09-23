@@ -86,6 +86,19 @@ JSON
 
 "${repo_root}/scripts/resolve-config.sh" >"${out_dir}/config.json"
 
+# The model and effort a review actually runs on, from the same resolved
+# config review.yml reads. Without them a live run scored the CLI's own default
+# model, so the eval could pass while measuring a reviewer nobody ships — and
+# the one change it most needs to gate, a new model, was invisible to it.
+model_args=()
+cfg_model="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "${out_dir}/config.json")"
+cfg_effort="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("effort",""))' "${out_dir}/config.json")"
+[ -n "$cfg_model" ] && model_args+=(--model "$cfg_model")
+[ -n "$cfg_effort" ] && model_args+=(--effort "$cfg_effort")
+if [ "$live" -eq 1 ]; then
+  printf 'run-eval: [live] model=%s effort=%s\n' "${cfg_model:-(CLI default)}" "${cfg_effort:-(model default)}" >&2
+fi
+
 # ---------------------------------------------------------------------------
 # Produce one response JSON per fixture.
 # ---------------------------------------------------------------------------
@@ -147,6 +160,7 @@ EOF
           --output-format json \
           --json-schema "$(cat "${out_dir}/schema.json")" \
           --max-turns 15 \
+          ${model_args[@]+"${model_args[@]}"} \
           --allowedTools "Read,Grep,Glob" \
           <"${out_dir}/${name}.prompt.md" ) >"${out_dir}/${name}.response.json" 2>"${out_dir}/${name}.err"; then
     printf 'run-eval: %s: the claude CLI exited non-zero\n' "$name" >&2
