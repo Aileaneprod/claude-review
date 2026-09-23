@@ -145,6 +145,37 @@ contributions.
 - No workflow `run:` block contains a `${{ }}` expression. Every value arrives
   through `env:`, so nothing can break out into shell.
 
+### Argument injection
+
+`.claude-review.yml` is read from the head of the pull request under review, so
+its values are the author's to write. Most of them are numbers, globs or text
+the prompt quotes. `model` is not: it becomes `--model` in `claude_args`, and
+`claude-code-action` splits `claude_args` with shell-quote into the CLI's
+argument vector. An unchecked model containing a space and a `--flag` would
+therefore not be a model name: it would be a model name followed by a flag of
+the author's choosing, and the CLI's flags include the ones that decide what
+the reviewer is allowed to run. The Claude GitHub App's default-branch check
+does not help: it covers the workflow file, not this one.
+
+So `resolve-config.sh` checks it where the value is resolved, once, whatever
+file it came from. `model` must look like a model identifier or alias —
+letters, digits, dots and hyphens, starting with a letter or digit, an optional
+`[1m]`-style suffix, 64 characters at most. A value that fails fails the run
+with the file named, before any model call.
+`scripts/test/cases/resolve-config.sh` carries the injection attempts, and they
+fail against the code without the check.
+
+A check can also be walked around rather than broken. Every step after the
+checkout runs in the pull request's head, and `python3 -` and `python3 -c` —
+nearly every python call here — put that directory first on `sys.path`. A pull
+request that adds a `json.py` at its root would have its own code imported by
+the step that reads the validated model back, and could hand the reviewer a
+flag after the check had passed; the same module would run inside every other
+step holding `GH_TOKEN`, where it could rewrite the review's own summary and
+outcome check. The review job sets `PYTHONSAFEPATH=1`, which drops that entry,
+and `scripts/test/cases/review-steps.sh` plants the module and checks it is
+both live without the variable and ignored with it.
+
 ## Sticky summary and dedupe
 
 `post-review.sh` owns the summary comment. It runs twice:
