@@ -299,6 +299,31 @@ def validate(data, path):
             "carry one. Got %r.\n" % (path, language)
         )
         sys.exit(1)
+
+    # `model` reaches the CLI's ARGUMENT VECTOR, not the prompt, and that is the
+    # more dangerous of the two. review.yml prints it into claude_args, and
+    # claude-code-action tokenises claude_args with shell-quote — so whitespace
+    # inside the value becomes a new argument. This file is read from the head
+    # of the pull request under review, and the Claude App's default-branch
+    # check covers the workflow file, not this one. So a branch author who could
+    # put a space in `model` could hand the CLI flags of their choosing: ones
+    # that widen the reviewer's permissions, or append to its system prompt.
+    # `language` above is guarded because it becomes instruction; this is
+    # guarded because it becomes an option.
+    #
+    # The shape is closed on purpose. A model is an identifier or an alias —
+    # letters, digits, `.`, `-`, and the `[1m]` context suffix. That shape
+    # cannot hold a space, a quote or a shell operator, which is the whole point.
+    model = data.get("model") or ""
+    if model and (len(model) > 64
+                  or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.\-]*(?:\[[0-9a-z]+\])?", model)):
+        sys.stderr.write(
+            "resolve-config: %s: key 'model' must be a model identifier or alias "
+            "— letters, digits, '.', '-', optionally a '[1m]'-style suffix, 64 "
+            "characters at most. This value becomes a command-line argument, so "
+            "it must not be able to carry another one. Got %r.\n" % (path, model)
+        )
+        sys.exit(1)
     return data
 
 

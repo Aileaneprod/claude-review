@@ -264,6 +264,11 @@ It is passed through as `--model` inside `claude_args`. The action has no
 `model` input; that was removed, along with `max_turns`, `allowed_tools`, and
 the other former top-level inputs. Everything goes through `claude_args` now.
 
+Because it lands on a command line from a file the pull request under review
+can edit, the value is shape-checked: letters, digits, `.` and `-`, an optional
+`[1m]`-style suffix, 64 characters at most. A value outside that shape fails the
+run and names the file — see "Argument injection" in `docs/ARCHITECTURE.md`.
+
 A smaller model is cheaper per review and noticeably worse at the thing that
 matters most here — grounding a finding by reading surrounding code rather than
 pattern-matching the diff. If you downgrade, run the eval and watch the decoy

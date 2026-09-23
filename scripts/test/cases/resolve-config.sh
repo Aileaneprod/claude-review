@@ -102,3 +102,46 @@ it "still lets a caller that DOES pass an input win"
 assert_equal "12" "$(_resolved '{"max_turns": 12}' max_turns)" "an explicit input overrides the file"
 assert_equal "generic" "$(_resolved '{"profile": "generic"}' profile)" "an explicit profile overrides"
 assert_equal "True" "$(_resolved '{"fail_on_blocking": true}' fail_on_blocking)" "an explicit flag overrides"
+
+# --- model reaches the CLI's argument vector ------------------------------------
+#
+# `language` above is guarded because it becomes INSTRUCTION. `model` is guarded
+# because it becomes an OPTION. review.yml prints it into claude_args, and
+# claude-code-action tokenises claude_args with shell-quote — so a space inside
+# the value becomes a second argument. This file is read from the head of the
+# pull request under review, and the Claude App's default-branch check covers
+# the workflow file, not this one.
+#
+# Before this guard `model` was checked only for being a string, so any branch
+# author could have put a second option after the model name. The payloads
+# below are shapes, not working exploits: each one fails if a value can carry a
+# separator, whatever flag it tries to smuggle.
+
+_kv_config() {
+  local f="$TESTTMP/rc-kv.yml"
+  python3 -c "
+import sys
+open(sys.argv[1], 'w', encoding='utf-8').write('%s: \"%s\"\n' % (sys.argv[2], sys.argv[3]))
+" "$f" "$1" "$2"
+  printf '%s' "$f"
+}
+_resolve_kv() { "$SCRIPTS/resolve-config.sh" --repo-config "$(_kv_config "$1" "$2")"; }
+
+it "refuses a model that carries a second argument"
+assert_status 1 "a space inside model is refused" -- \
+  _resolve_kv model "claude-opus-5-5 --some-other-flag"
+assert_status 1 "a quote inside model is refused" -- \
+  _resolve_kv model "claude-opus-5-5\" --some-other-flag \""
+assert_status 1 "a newline inside model is refused" -- \
+  _resolve_kv model "claude-opus-5-5\n--some-other-flag"
+assert_status 1 "a shell operator inside model is refused" -- \
+  _resolve_kv model "claude-opus-5-5;echo"
+assert_status 1 "a leading dash is refused" -- \
+  _resolve_kv model "--some-other-flag"
+
+it "still accepts every real model name"
+assert_status 0 "a full identifier is accepted" -- _resolve_kv model "claude-opus-5-5"
+assert_status 0 "an alias is accepted" -- _resolve_kv model "opus"
+assert_status 0 "the 1M-context suffix is accepted" -- _resolve_kv model "claude-opus-5-5[1m]"
+assert_status 0 "a dotted identifier is accepted" -- _resolve_kv model "claude-sonnet-4.6"
+assert_status 0 "an empty model still means the action's default" -- _resolve_kv model ""

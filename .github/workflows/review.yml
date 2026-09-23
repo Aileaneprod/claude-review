@@ -173,6 +173,18 @@ jobs:
       && github.event.pull_request.user.login != 'renovate'
       && !contains(github.event.pull_request.labels.*.name, 'skip-ai-review')
       && github.event.pull_request.head.repo.full_name == github.repository
+    # PYTHON MUST NOT IMPORT FROM THE PULL REQUEST. Every step after the
+    # checkout runs with the pull request's head as its working directory, and
+    # `python3 -` and `python3 -c` — the form of nearly every python call in
+    # this file and in scripts/ — put that directory FIRST on sys.path. A pull
+    # request adding a `json.py` at its root then runs its own code inside
+    # steps that hold GH_TOKEN, and can rewrite the model AFTER
+    # resolve-config.sh has checked it, handing the reviewer a flag of its
+    # choosing. PYTHONSAFEPATH (python 3.11+; ubuntu-latest ships 3.12) drops
+    # that entry. No script here imports a module of its own, so nothing
+    # depends on it. scripts/test/cases/review-steps.sh plants the `json.py`.
+    env:
+      PYTHONSAFEPATH: "1"
     # NO `permissions:` block here, on purpose, and it is not an omission.
     #
     # A block in a CALLED workflow is exhaustive: whatever it does not list is
@@ -630,6 +642,13 @@ jobs:
           {
             printf 'value<<CLAUDE_ARGS_EOF\n'
             printf -- '--max-turns %s\n' "$turns"
+            # The model is shape-checked by resolve-config.sh before it reaches
+            # this line. claude-code-action tokenises claude_args with
+            # shell-quote, and the value comes from a file the pull request
+            # under review can edit, so an unchecked one could carry a second
+            # argument. Checked once, at the place the value is resolved — and
+            # read back above with the job's PYTHONSAFEPATH set, so a `json.py`
+            # in the pull request cannot rewrite it between the two.
             if [ -n "$model" ]; then
               printf -- '--model %s\n' "$model"
             fi
