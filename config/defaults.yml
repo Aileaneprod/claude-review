@@ -30,10 +30,36 @@
 # generic — or several, comma-separated (e.g. node-typescript,postgres).
 profile: auto
 
-# Model ID. Empty means "let claude-code-action choose its own default", which
-# is the right answer almost always. Model IDs change; see docs/TUNING.md before
-# pinning one here.
-model: ""
+# Model ID. Empty means "let claude-code-action choose its own default", and for
+# a long time that was the right answer. It is pinned now for two reasons.
+#
+# The first is that an empty value is not neutral: it silently hands the choice
+# of reviewer to whoever sets the action's default, and a change there alters
+# every review in every repository with no commit here. Measured on 2026-09-22,
+# the default was claude-sonnet-5.
+#
+# The second is that this is a deliberate upgrade. claude-opus-5-5 costs TWICE
+# claude-sonnet-5 per token ($4 / $20 per MTok against $2 / $10), and reviews run
+# on a subscription whose weekly limit was hit on 2026-09-17 and again on
+# 2026-09-22 at the old model. Expect the limit to arrive sooner. The fallback
+# credential in review.yml exists for that, and so does lowering `effort` below.
+#
+# The value is validated as an identifier by resolve-config.sh — it becomes a
+# command-line argument, so it cannot be allowed to carry another one. Model IDs
+# change; see docs/TUNING.md before editing.
+model: claude-opus-5-5
+
+# Reasoning effort: low, medium, high, xhigh, max. Empty means the model's own
+# default, which on claude-opus-5-5 is `medium` — one level BELOW claude-opus-5's
+# `high`, so leaving it empty would be a quiet downgrade on the upgrade.
+#
+# `xhigh` is what a Claude Code "ultracode" session runs at, minus the
+# multi-agent orchestration that has no meaning for an unattended review. It is
+# the level Anthropic recommends for most coding and agentic work. `max` sits
+# above it and costs more thinking per turn; raise to it only once a live eval
+# shows headroom at `xhigh`. This is the first lever to pull if quota gets tight
+# — `high` gives back a large share of the spend.
+effort: xhigh
 
 # Maximum agentic turns for a single review. The main lever on cost per review.
 #

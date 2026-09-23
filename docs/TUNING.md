@@ -229,7 +229,8 @@ that drifts from CI as a local-environment artefact until CI agrees.
 | Wrong findings on one stack | Edit that `prompts/profiles/*.md`, not `base.md` |
 | Flags things a linter owns | Add the linter to grounding rule 5 |
 | Misses a defect class you care about | Add it to the matching profile, then add a fixture |
-| Reviews cost too much | Lower `max_turns` (60 → 30). Fewer turns means less file-reading, so expect precision to drop |
+| Reviews cost too much | Lower `effort` first (`xhigh` → `high`): same model, less thinking. Then `max_turns` (60 → 30) — fewer turns means less file-reading, so expect precision to drop. See "Choosing a model and an effort" |
+| Reviews stop when the subscription hits its limit | Set a fallback credential on another subscription — `docs/SETUP.md`, step 3f |
 | Huge PRs get shallow reviews | Raise `max_diff_lines`, or accept triage mode |
 
 Set these in `config/defaults.yml` for everywhere, or `.claude-review.yml` for
@@ -247,32 +248,59 @@ The value lives in `config/defaults.yml`, once.
 `scripts/test/cases/collect-inputs.sh` reads `review.yml` and fails if a new
 input breaks it — a comment could not enforce this, and did not.
 
-## Choosing a model
+## Choosing a model and an effort
 
-`model` is empty by default, which lets `claude-code-action` use its own
-default. That is usually the right answer and is why nothing is pinned.
+Both are pinned in `config/defaults.yml`: `model: claude-opus-5-5`,
+`effort: xhigh`. They become `--model` and `--effort` inside `claude_args` —
+the action has no `model` input; that was removed, along with `max_turns`,
+`allowed_tools`, and the other former top-level inputs.
+
+For a long time `model` was empty, and that was not the neutral choice it looked
+like. Empty hands the choice of reviewer to whoever sets `claude-code-action`'s
+default, so a change there alters every review in every repository with no
+commit here. Measured on 2026-09-22, that default was `claude-sonnet-5`.
+
+`effort` is one of `low`, `medium`, `high`, `xhigh`, `max`. **There is no
+`ultra`**: that is a Claude Code session mode, and its effort is `xhigh` — the
+multi-agent orchestration that comes with it has no meaning for an unattended
+review. `resolve-config.sh` refuses `ultra` by name and says which level was
+meant, rather than letting the CLI reject it on every review. Left empty, the
+effort is the model's own default, which on `claude-opus-5-5` is `medium`.
+
+**What it costs.** `claude-opus-5-5` is twice `claude-sonnet-5` per token ($4 /
+$20 per MTok against $2 / $10), and `xhigh` thinks more per turn than the
+default. Reviews run on a subscription whose weekly limit was reached on
+2026-09-17 and again on 2026-09-22 at the old settings, so expect it sooner.
+In order, the levers are:
+
+1. **A fallback credential** on another subscription (`docs/SETUP.md`,
+   step 3f). It changes nothing about a review; it turns a limit from an outage
+   into a non-event.
+2. **`effort: high`.** Gives back a large share of the thinking, keeps the
+   model.
+3. **`max_turns`**, knowing what it risks (the evidence is in
+   `config/defaults.yml`).
+4. **A smaller model**, last. It is cheaper per review and noticeably worse at
+   the thing that matters most here — grounding a finding by reading
+   surrounding code rather than pattern-matching the diff. If you downgrade,
+   run the eval and watch the decoy column.
+
+Raise to `max` only once a live eval shows headroom at `xhigh`.
 
 **Do not copy a model ID from memory or from an old example — they change and go
-away.** Read the current IDs from the official Claude Code documentation, then
-set it explicitly if you want to:
+away.** Read the current IDs from the official Claude Code documentation.
 
-```yaml
-model: "the-current-id-from-the-docs"
-```
+**A repository's own file beats all of this, including with an empty value.**
+`model: ""` in `.claude-review.yml` does not mean "the default"; it means
+"whatever the action picks". `templates/.claude-review.yml` used to ship exactly
+that line, which would have kept every repository that copied it on the old
+model; it now ships both keys commented out, and
+`scripts/test/cases/resolve-config.sh` checks that a copy of it keeps the
+central values.
 
-It is passed through as `--model` inside `claude_args`. The action has no
-`model` input; that was removed, along with `max_turns`, `allowed_tools`, and
-the other former top-level inputs. Everything goes through `claude_args` now.
-
-Because it lands on a command line from a file the pull request under review
-can edit, the value is shape-checked: letters, digits, `.` and `-`, an optional
-`[1m]`-style suffix, 64 characters at most. A value outside that shape fails the
-run and names the file — see "Argument injection" in `docs/ARCHITECTURE.md`.
-
-A smaller model is cheaper per review and noticeably worse at the thing that
-matters most here — grounding a finding by reading surrounding code rather than
-pattern-matching the diff. If you downgrade, run the eval and watch the decoy
-column.
+Both values reach a command line from a file the pull request under review can
+edit, so both are shape-checked — see "Argument injection" in
+`docs/ARCHITECTURE.md`.
 
 ## Editing prompts
 

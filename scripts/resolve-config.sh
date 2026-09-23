@@ -105,9 +105,15 @@ import sys
 #
 # Everything else is rejected with a file:line message.
 
+# The levels `claude --effort` accepts, in order. Kept beside SCHEMA because a
+# value outside this set is not a typo the CLI tolerates: it is an argument the
+# CLI rejects, on every review, until someone notices.
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+
 SCHEMA = {
     "profile": str,
     "model": str,
+    "effort": str,
     "max_turns": int,
     "max_findings": int,
     "max_diff_lines": int,
@@ -300,20 +306,21 @@ def validate(data, path):
         )
         sys.exit(1)
 
-    # `model` reaches the CLI's ARGUMENT VECTOR, not the prompt, and that is the
-    # more dangerous of the two. review.yml prints it into claude_args, and
-    # claude-code-action tokenises claude_args with shell-quote — so whitespace
-    # inside the value becomes a new argument. This file is read from the head
-    # of the pull request under review, and the Claude App's default-branch
-    # check covers the workflow file, not this one. So a branch author who could
-    # put a space in `model` could hand the CLI flags of their choosing: ones
-    # that widen the reviewer's permissions, or append to its system prompt.
-    # `language` above is guarded because it becomes instruction; this is
-    # guarded because it becomes an option.
+    # `model` and `effort` reach the CLI's ARGUMENT VECTOR, not the prompt, and
+    # that is the more dangerous of the two. review.yml prints them into
+    # claude_args, and claude-code-action tokenises claude_args with shell-quote
+    # — so whitespace inside a value becomes a new argument. This file is read
+    # from the head of the pull request under review, and the Claude App's
+    # default-branch check covers the workflow file, not this one. So a branch
+    # author who could put a space in `model` could hand the CLI flags of their
+    # choosing: ones that widen the reviewer's permissions, or append to its
+    # system prompt. `language` above is guarded because it becomes instruction;
+    # these are guarded because they become options.
     #
-    # The shape is closed on purpose. A model is an identifier or an alias —
-    # letters, digits, `.`, `-`, and the `[1m]` context suffix. That shape
-    # cannot hold a space, a quote or a shell operator, which is the whole point.
+    # The shapes are closed on purpose. A model is an identifier or an alias —
+    # letters, digits, `.`, `-`, and the `[1m]` context suffix. An effort is one
+    # of the five levels the CLI documents. Neither shape can hold a space, a
+    # quote or a shell operator, which is the whole point.
     model = data.get("model") or ""
     if model and (len(model) > 64
                   or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.\-]*(?:\[[0-9a-z]+\])?", model)):
@@ -322,6 +329,15 @@ def validate(data, path):
             "— letters, digits, '.', '-', optionally a '[1m]'-style suffix, 64 "
             "characters at most. This value becomes a command-line argument, so "
             "it must not be able to carry another one. Got %r.\n" % (path, model)
+        )
+        sys.exit(1)
+
+    effort = data.get("effort") or ""
+    if effort and effort not in EFFORT_LEVELS:
+        sys.stderr.write(
+            "resolve-config: %s: key 'effort' must be one of %s, got %r. The CLI "
+            "has no 'ultra' level: that is a Claude Code session mode, and its "
+            "effort is 'xhigh'.\n" % (path, ", ".join(EFFORT_LEVELS), effort)
         )
         sys.exit(1)
     return data

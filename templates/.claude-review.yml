@@ -16,10 +16,18 @@
 # detection gets it wrong (a monorepo with no tsconfig.json at the root, say).
 profile: auto
 
-# Pin a model for this repo. Empty means "use the action's own default", which
-# is what you want unless you have a specific reason. Model IDs change — read
-# the current ones from the Claude Code docs, do not copy one from memory.
-model: ""
+# Model and reasoning effort. Left COMMENTED OUT on purpose: the central
+# defaults pin both (config/defaults.yml says which, and why), and any value
+# written here beats them — including an empty one. `model: ""` does not mean
+# "the default"; it means "whatever claude-code-action picks", which is a
+# cheaper model than the one the central default chose. Uncomment only to
+# override for this repo, and read docs/TUNING.md first: model IDs change, so
+# read the current ones from the Claude Code docs, not from memory.
+#
+# effort is one of low, medium, high, xhigh, max. There is no `ultra`: that is
+# a Claude Code session mode, whose effort is `xhigh`.
+# model: claude-opus-5-5
+# effort: xhigh
 
 # Turn budget for a single review. Lower is cheaper and shallower — but a review
 # that runs out of turns costs the same as one that finishes and delivers

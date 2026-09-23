@@ -16,7 +16,7 @@ _collect() { env "$@" "$SCRIPTS/collect-inputs.sh" --out "$(_out)" && cat "$(_ou
 it "emits nothing when every input is empty"
 # The case that matters: a caller setting no inputs must leave defaults.yml
 # untouched, which means an EMPTY object, not a populated one.
-assert_equal "{}" "$(_collect IN_PROFILE= IN_MODEL= IN_MAX_TURNS= IN_MAX_FINDINGS= \
+assert_equal "{}" "$(_collect IN_PROFILE= IN_MODEL= IN_EFFORT= IN_MAX_TURNS= IN_MAX_FINDINGS= \
                               IN_MAX_DIFF_LINES= IN_EXCLUDE_PATHS= IN_LANGUAGE= \
                               IN_FAIL_ON_BLOCKING=)" "all-empty yields {}"
 
@@ -31,6 +31,8 @@ assert_contains '"profile": "generic"' "an explicit profile is carried" -- \
   _collect IN_PROFILE=generic
 assert_contains '"fail_on_blocking": true' "an explicit true is carried" -- \
   _collect IN_FAIL_ON_BLOCKING=true
+assert_contains '"effort": "high"' "an explicit effort is carried" -- \
+  _collect IN_EFFORT=high
 
 it "carries an explicit false, which is not the same as absent"
 assert_contains '"fail_on_blocking": false' "explicit false is carried" -- \
@@ -81,3 +83,27 @@ print(' '.join(sorted(bad)) if bad else 'none')
 }
 assert_equal "none" "$(_defaults_report "$SCRIPTS/../.github/workflows/review.yml")" \
   "no config-mirroring input carries a default"
+
+it "is fed every variable it reads by the workflow that calls it"
+# The script reads an absent IN_ variable as empty, so an input declared in
+# review.yml but never passed to the Collect step fails silently: the caller's
+# `with:` is accepted and then dropped. List what the script reads and require
+# review.yml to set each one from the input of the same name.
+_unfed() {
+  python3 - "$SCRIPTS/collect-inputs.sh" "$SCRIPTS/../.github/workflows/review.yml" <<'PY'
+import re
+import sys
+
+script = open(sys.argv[1], encoding="utf-8").read()
+workflow = open(sys.argv[2], encoding="utf-8").read()
+read = sorted(set(re.findall(r'"(IN_[A-Z_]+)"', script)))
+if not read:
+    print("(the script reads no IN_ variable)")
+    raise SystemExit(0)
+pattern = r"^\s+%s: \$\{\{ inputs\.%s \}\}\s*$"
+unfed = [name for name in read
+         if not re.search(pattern % (name, name[3:].lower()), workflow, re.M)]
+print(" ".join(unfed) if unfed else "none")
+PY
+}
+assert_equal "none" "$(_unfed)" "every IN_ variable the script reads is set from its input"

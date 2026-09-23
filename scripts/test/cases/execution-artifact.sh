@@ -1,8 +1,9 @@
 # The reviewer's execution trace has to survive the run that made it.
 #
-# `steps.claude.outputs.execution_file` is the only record of what the reviewer
-# did rather than what it was given: the result record, the turn count, the
-# denied tools, and every tool call. Four steps in review.yml read it and none
+# The execution file — `steps.review_result.outputs.execution_file`, the attempt
+# that counted — is the only record of what the reviewer did rather than what it
+# was given: the result record, the turn count, the denied tools, and every
+# tool call. Four steps in review.yml read it and none
 # of them kept it, so it died with the runner. The run log does not stand in —
 # it expires after 38 days and carries no `tool_use` records at all, so a file
 # being in the prompt is provable and the reviewer having read it is not. An
@@ -40,7 +41,7 @@ for block in re.split(r"(?m)^      - ", text)[1:]:
     for line in block.splitlines():
         stripped = line.strip()
         if (stripped.startswith("path:")
-                and "steps.claude.outputs.execution_file" in stripped):
+                and "steps.review_result.outputs.execution_file" in stripped):
             found.append(block)
             break
 
@@ -166,3 +167,36 @@ PY
 
 assert_status 0 "the retention outlives the 38-day run log and fits the 90-day ceiling" \
   -- _retention_ok
+
+# --- it archives the review that COUNTED -------------------------------------
+#
+# With a fallback credential there can be two attempts, and only one of them is
+# the review. The first may be a one-turn 429 at zero cost; the second is where
+# the work happened. Archiving the first — which is what naming `steps.claude`
+# directly would do — keeps the record of the refusal and throws away the
+# record of the review, which is the one trace an audit ever needs.
+
+it "archives the attempt that counted, not the first attempt"
+
+_uploads_of() {
+  python3 - "$SCRIPTS/../.github/workflows/review.yml" "$1" <<'PY'
+import io
+import re
+import sys
+
+text, wanted = io.open(sys.argv[1], encoding="utf-8").read(), sys.argv[2]
+count = 0
+for block in re.split(r"(?m)^      - ", text)[1:]:
+    if "upload-artifact" not in block:
+        continue
+    for line in block.splitlines():
+        if line.strip().startswith("path:") and wanted in line:
+            count += 1
+print(count)
+PY
+}
+
+assert_equal "1" "$(_uploads_of steps.review_result.outputs.execution_file)" \
+  "the archive reads the resolved attempt"
+assert_equal "0" "$(_uploads_of steps.claude.outputs.execution_file)" \
+  "and never the first attempt directly"

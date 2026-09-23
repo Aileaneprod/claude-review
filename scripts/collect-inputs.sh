@@ -5,9 +5,10 @@
 # Usage:
 #   collect-inputs.sh --out FILE
 #
-# Reads IN_PROFILE, IN_MODEL, IN_MAX_TURNS, IN_MAX_FINDINGS, IN_MAX_DIFF_LINES,
-# IN_EXCLUDE_PATHS, IN_LANGUAGE and IN_FAIL_ON_BLOCKING from the environment and
-# writes the JSON that resolve-config.sh layers over config/defaults.yml.
+# Reads IN_PROFILE, IN_MODEL, IN_EFFORT, IN_MAX_TURNS, IN_MAX_FINDINGS,
+# IN_MAX_DIFF_LINES, IN_EXCLUDE_PATHS, IN_LANGUAGE and IN_FAIL_ON_BLOCKING from
+# the environment and writes the JSON that resolve-config.sh layers over
+# config/defaults.yml.
 #
 # ONLY NON-EMPTY VALUES ARE EMITTED, and that is the whole design. Precedence is
 #
@@ -39,7 +40,7 @@ die() { printf 'collect-inputs: %s\n' "$1" >&2; exit 1; }
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --out) [ "$#" -ge 2 ] || die "--out requires a value"; out_file="$2"; shift 2 ;;
-    -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -54,6 +55,7 @@ out = {}
 
 for env_name, key in (("IN_PROFILE", "profile"),
                       ("IN_MODEL", "model"),
+                      ("IN_EFFORT", "effort"),
                       ("IN_LANGUAGE", "language")):
     value = (os.environ.get(env_name) or "").strip()
     if value:
