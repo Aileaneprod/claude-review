@@ -166,8 +166,8 @@ it "ships a pinned model and an explicit effort"
 # default. An empty effort is the model's own default, not a decision. Both
 # are decisions, so both are written down.
 _shipped() { "$SCRIPTS/resolve-config.sh" --repo-config /dev/null 2>/dev/null; }
-assert_contains '"model": "claude-opus-5"' "the model is pinned" -- _shipped
-assert_contains '"effort": "xhigh"' "and the effort is set" -- _shipped
+assert_contains '"model": "claude-opus-5-5"' "the model is pinned" -- _shipped
+assert_contains '"effort": "medium"' "and the effort is set" -- _shipped
 
 it "lets a repo that copied the template keep the central model and effort"
 # The template used to ship `model: ""`, and a repository file beats the
@@ -177,5 +177,5 @@ it "lets a repo that copied the template keep the central model and effort"
 mkdir -p "$TESTTMP/from-template"
 cp "$SCRIPTS/../templates/.claude-review.yml" "$TESTTMP/from-template/.claude-review.yml"
 _from_template() { "$SCRIPTS/resolve-config.sh" --repo-root "$TESTTMP/from-template" 2>&1; }
-assert_contains '"model": "claude-opus-5"' "the copied template keeps the central model" -- _from_template
-assert_contains '"effort": "xhigh"' "and the central effort" -- _from_template
+assert_contains '"model": "claude-opus-5-5"' "the copied template keeps the central model" -- _from_template
+assert_contains '"effort": "medium"' "and the central effort" -- _from_template

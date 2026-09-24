@@ -229,7 +229,7 @@ that drifts from CI as a local-environment artefact until CI agrees.
 | Wrong findings on one stack | Edit that `prompts/profiles/*.md`, not `base.md` |
 | Flags things a linter owns | Add the linter to grounding rule 5 |
 | Misses a defect class you care about | Add it to the matching profile, then add a fixture |
-| Reviews cost too much | Lower `effort` first (`xhigh` → `high`): same model, less thinking. Then `max_turns` (60 → 30) — fewer turns means less file-reading, so expect precision to drop. See "Choosing a model and an effort" |
+| Reviews cost too much | Lower `effort` first (`medium` → `low`): same model, less thinking. Then `max_turns` (60 → 30) — fewer turns means less file-reading, so expect precision to drop. See "Choosing a model and an effort" |
 | Reviews stop when the subscription hits its limit | Set a fallback credential on another subscription — `docs/SETUP.md`, step 3f |
 | Huge PRs get shallow reviews | Raise `max_diff_lines`, or accept triage mode |
 
@@ -250,8 +250,8 @@ input breaks it — a comment could not enforce this, and did not.
 
 ## Choosing a model and an effort
 
-Both are pinned in `config/defaults.yml`: `model: claude-opus-5`,
-`effort: xhigh`. They become `--model` and `--effort` inside `claude_args` —
+Both are pinned in `config/defaults.yml`: `model: claude-opus-5-5`,
+`effort: medium`. They become `--model` and `--effort` inside `claude_args` —
 the action has no `model` input; that was removed, along with `max_turns`,
 `allowed_tools`, and the other former top-level inputs.
 
@@ -265,27 +265,33 @@ commit here. Measured on 2026-09-22, that default was `claude-sonnet-5`.
 multi-agent orchestration that comes with it has no meaning for an unattended
 review. `resolve-config.sh` refuses `ultra` by name and says which level was
 meant, rather than letting the CLI reject it on every review. Left empty, the
-effort is the model's own default, which on `claude-opus-5` is `high`.
+effort is the model's own default, which on `claude-opus-5-5` is `medium` — one
+level below `claude-opus-5`'s `high`.
 
 **The model must be one the PRODUCTION CLI knows, not the newest one.**
-`claude-code-action@v1` pins Claude Code 2.1.278, and that CLI rejects
-`claude-opus-5-5` before sending anything (`unrecognized_model`). Measured on
-2026-09-23, on every fixture of the live eval, after a local 2.1.280 had
-accepted it without complaint. A model the pinned CLI does not know does not
-make reviews worse; it makes every review fail. So before changing `model`, run
-the live eval (`.github/workflows/eval.yml`, `live: true`): it passes the
-configured model and effort, on the same pinned CLI, and says so in its log.
+`claude-code-action@v1` pins its own Claude Code version, and a model that
+version does not know does not make reviews worse — it makes every review fail.
+On 2026-09-23 the pin was 2.1.278, which rejected `claude-opus-5-5` before
+sending anything (`unrecognized_model`, every fixture of the live eval) after a
+local 2.1.280 had accepted it without complaint; this repository shipped
+`claude-opus-5` until the action moved to 2.1.281. So before changing `model`,
+run the live eval (`.github/workflows/eval.yml`, `live: true`). It reads the
+version the action pins from the action itself, installs that one, passes the
+configured model and effort, and prints all three.
 
-**What it costs.** Opus costs more per token than Sonnet, and `xhigh` thinks
-more per turn than the default. Reviews run on a subscription whose weekly limit was reached on
-2026-09-17 and again on 2026-09-22 at the old settings, so expect it sooner.
+**What it costs.** Per MTok, `claude-opus-5-5` is $4 / $20, `claude-opus-5`
+$5 / $25, `claude-sonnet-5` $2 / $10. Measured on korbyx on 2026-09-23: about
+$1.20 a review on Sonnet 5, $3.60 to $4.90 on Opus 5 at `xhigh`, and the
+subscription's limit was reached that same afternoon. Hence `medium`: the
+newer, cheaper model at its own default level, raised only if the live eval
+shows findings being missed.
 In order, the levers are:
 
 1. **A fallback credential** on another subscription (`docs/SETUP.md`,
    step 3f). It changes nothing about a review; it turns a limit from an outage
    into a non-event.
-2. **`effort: high`.** Gives back a large share of the thinking, keeps the
-   model.
+2. **`effort: low`.** Less thinking again, same model. Check the live eval
+   first: below `medium` is where missed findings are likeliest.
 3. **`max_turns`**, knowing what it risks (the evidence is in
    `config/defaults.yml`).
 4. **A smaller model**, last. It is cheaper per review and noticeably worse at
@@ -293,7 +299,8 @@ In order, the levers are:
    surrounding code rather than pattern-matching the diff. If you downgrade,
    run the eval and watch the decoy column.
 
-Raise to `max` only once a live eval shows headroom at `xhigh`.
+Raise effort one level at a time (`high`, then `xhigh`), and only on a live
+eval that shows the level below missing findings.
 
 **Do not copy a model ID from memory or from an old example — they change and go
 away.** Read the current IDs from the official Claude Code documentation.

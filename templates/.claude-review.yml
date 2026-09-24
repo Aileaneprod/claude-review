@@ -26,8 +26,8 @@ profile: auto
 #
 # effort is one of low, medium, high, xhigh, max. There is no `ultra`: that is
 # a Claude Code session mode, whose effort is `xhigh`.
-# model: claude-opus-5
-# effort: xhigh
+# model: claude-opus-5-5
+# effort: medium
 
 # Turn budget for a single review. Lower is cheaper and shallower — but a review
 # that runs out of turns costs the same as one that finishes and delivers
