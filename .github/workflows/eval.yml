@@ -24,6 +24,22 @@ on:
         description: "Run a single fixture by name (blank = all)"
         type: string
         default: ""
+      repeat:
+        description: "Reviews per fixture. One live run is one sample; 3 gives rates"
+        type: string
+        default: "1"
+      learnings:
+        description: "Lessons injected: blank = prompts/learnings.md, none, or drop:K to leave out lesson K"
+        type: string
+        default: ""
+      min_hit_rate:
+        description: "With repeat > 1: share of runs that must find each planted defect (blank = 1)"
+        type: string
+        default: ""
+      max_decoy_rate:
+        description: "With repeat > 1: share of runs allowed to hit a decoy (blank = 0)"
+        type: string
+        default: ""
 
 concurrency:
   group: claude-review-eval-${{ github.ref }}
@@ -68,6 +84,10 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           LIVE: ${{ inputs.live }}
           FIXTURE: ${{ inputs.fixture }}
+          REPEAT: ${{ inputs.repeat }}
+          LEARNINGS: ${{ inputs.learnings }}
+          MIN_HIT_RATE: ${{ inputs.min_hit_rate }}
+          MAX_DECOY_RATE: ${{ inputs.max_decoy_rate }}
         run: |
           set -euo pipefail
           args=()
@@ -81,6 +101,15 @@ jobs:
           if [ -n "$FIXTURE" ]; then
             args+=(--fixture "$FIXTURE")
           fi
+          args+=(--repeat "${REPEAT:-1}")
+          case "${LEARNINGS:-}" in
+            "")     ;;
+            none)   args+=(--learnings none) ;;
+            drop:*) args+=(--drop-lesson "${LEARNINGS#drop:}") ;;
+            *)      echo "::error title=Bad input::learnings must be blank, none, or drop:K"; exit 1 ;;
+          esac
+          if [ -n "${MIN_HIT_RATE:-}" ]; then args+=(--min-hit-rate "$MIN_HIT_RATE"); fi
+          if [ -n "${MAX_DECOY_RATE:-}" ]; then args+=(--max-decoy-rate "$MAX_DECOY_RATE"); fi
           ./eval/run-eval.sh "${args[@]}" | tee "$RUNNER_TEMP/eval.txt"
 
       - name: Publish the report

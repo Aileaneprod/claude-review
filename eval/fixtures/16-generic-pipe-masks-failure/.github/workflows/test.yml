@@ -1,0 +1,32 @@
+name: test
+
+on:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+
+      # Keep the linter's output as an artifact, and still fail the job on a
+      # lint error: `shell: bash` makes GitHub run the step with pipefail.
+      - name: Lint
+        shell: bash
+        run: npm run lint | tee lint.log
+
+      # Keep the test report as an artifact too.
+      - name: Unit tests
+        run: npm test | tee test.log
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports
+          path: |
+            lint.log
+            test.log

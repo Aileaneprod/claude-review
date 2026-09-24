@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-15",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/provision.ts",
+        "line": 19,
+        "severity": "blocking",
+        "title": "isProvisioned checks two of the three conditions its docstring promises: the password hash is never read",
+        "evidence": "return hasCredentialAccount(user.id);",
+        "why_it_matters": "The docstring makes condition 3, a password hash set on the credential account, part of 'provisioned'. Account.passwordHash is null until the user chooses a password, and nothing reads it, so the CLI prints 'provisioned' for an account that cannot sign in.",
+        "suggested_fix": "Return accounts.some((a) => a.providerId === \"credential\" && a.passwordHash !== null)."
+      }
+    ]
+  }
+}

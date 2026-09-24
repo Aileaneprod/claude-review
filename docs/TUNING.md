@@ -208,6 +208,39 @@ any finding on it is a false positive by definition.
 A run is a regression if any expected finding is missed or any decoy is hit, and
 the script exits non-zero on either.
 
+### One live run is one sample
+
+The same fixture on the same code does not give the same answer twice. Measured
+on 2026-09-24: fixture 04 at effort `high` found its defect in 1 run of 2. A
+single live run therefore cannot tell an improvement from luck, and comparing
+two single runs compares two coin flips.
+
+```bash
+./eval/run-eval.sh --live --repeat 3                       # each defect and decoy as k of 3
+./eval/run-eval.sh --live --repeat 3 --learnings none      # the same, with no lesson
+./eval/run-eval.sh --live --repeat 3 --drop-lesson 2       # without lesson 2 only
+```
+
+With `--repeat`, every planted defect and every decoy is reported as a rate. The
+gate is `--min-hit-rate` (share of runs that must find each defect, default 1)
+and `--max-decoy-rate` (share allowed to hit a decoy, default 0). A run that
+failed to execute is left out of the rate rather than counted as a miss.
+`eval/.out/summary.json` records every rate with the model, the effort and the
+lessons injected, so two measurements can be put side by side. The `Prompt eval`
+workflow takes the same options as inputs; `learnings` is blank, `none`, or
+`drop:K`.
+
+Two uses matter most:
+
+- **Before believing a change, measure the noise.** Run the unchanged prompt with
+  `--repeat 3` first. A defect found 2 times out of 3 before the change and 3 out
+  of 3 after has not been shown to improve anything.
+- **Measure a lesson before keeping it.** Run with and without it. A lesson whose
+  removal *raises* the rate of a planted defect is hiding real defects, and it is
+  the one kind of lesson that must go even if it reads well. A lesson whose
+  removal changes nothing costs prompt on every review for no measured effect —
+  check `scripts/lesson-overlap.sh` for whether the base prompt already says it.
+
 ### Local live runs are advisory, not authoritative
 
 `claude --bare` is the documented way to get reproducible runs, but it **does

@@ -1,0 +1,21 @@
+{
+  "profile": "generic",
+  "summary": "A step without `shell:` runs under `bash -e {0}` on GitHub-hosted Linux, without pipefail, so `npm test | tee test.log` takes tee's exit status and a failing test suite passes the job. The lint step declares `shell: bash`, which GitHub runs as `bash --noprofile --norc -eo pipefail {0}`: the same pipe is correct there, and it is the decoy.",
+  "lesson": "A claim about a platform is looked up before it carries a 🔴",
+  "must_find": [
+    {
+      "id": "test-pipe-masks-failure",
+      "path": ".github/workflows/test.yml",
+      "min_severity": "important",
+      "any_of": ["npm test |", "test.log", "unit tests step", "unit test step", "test step", "test failures", "failing test", "bash -e"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-lint-step-has-pipefail",
+      "path": ".github/workflows/test.yml",
+      "any_of": ["lint step masks", "lint failures are masked", "lint failures are hidden", "lint errors are masked", "lint result is lost", "masks lint", "lint step never fails", "lint step always"],
+      "why": "With `shell: bash` GitHub runs the step with `-eo pipefail`, so a lint failure still fails the job, as the comment above it says. Flagging it is the platform claim the lesson warns about, asserted without checking. Every keyword is a claim about the lint step; none is a string of the diff."
+    }
+  ]
+}

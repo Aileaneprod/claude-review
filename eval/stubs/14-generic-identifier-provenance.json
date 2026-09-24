@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 6,
+  "session_id": "stub-14",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "test/scenarios/make_companies.py",
+        "line": 10,
+        "severity": "important",
+        "title": "Generated SIRENs are unverified and may belong to real companies",
+        "evidence": "PREFIX = \"810000\"",
+        "why_it_matters": "A Luhn-valid number with a realistic prefix is in the registry's own number space, so calling it invented proves nothing. README.md requires identifiers from IDENTIFIERS.md, the list checked one by one against the registry, and forbids generating new ones.",
+        "suggested_fix": "Take the SIRENs from IDENTIFIERS.md instead of generating them."
+      }
+    ]
+  }
+}

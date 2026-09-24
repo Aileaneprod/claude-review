@@ -1,0 +1,21 @@
+{
+  "profile": "postgres",
+  "summary": "Seed rows that pass every referential and temporal check while contradicting each other: an account the README says was never activated has a paid invoice. A voided invoice, explained by the README, is the decoy.",
+  "lesson": "Fixtures can be referentially and temporally valid while still lying",
+  "must_find": [
+    {
+      "id": "never-activated-account-paid",
+      "path": "test/scenarios/seed.sql",
+      "min_severity": "important",
+      "any_of": ["never_activated", "never activated", "account 3", "invoice 301", "(301,", "contradict"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-void-invoice-is-expected",
+      "path": "test/scenarios/seed.sql",
+      "any_of": ["void invoice is", "voided invoice is", "invoice 402", "void status is", "void is not a", "void should be", "unpaid void"],
+      "why": "The README says account 4's second order was cancelled and a void invoice is the expected trace of that. Flagging it means the reviewer judged the row by its status alone without reading the scenario it models, which is the opposite of the lesson. Every keyword states a claim about the void invoice; none of them is a string of the diff, which writes `(402, 4, 'void', ...)`."
+    }
+  ]
+}

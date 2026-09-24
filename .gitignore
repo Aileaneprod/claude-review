@@ -24,3 +24,8 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Python bytecode. A fixture lists every file it holds as in scope for the
+# reviewer, so a stray .pyc would be handed to the model as code under review.
+__pycache__/
+*.pyc

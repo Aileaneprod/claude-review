@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 4,
+  "session_id": "stub-17",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "app/booking.py",
+        "line": 17,
+        "severity": "important",
+        "title": "DATE_SHAPE checks the shape of the day, not that it exists: 2026-02-31 is stored as valid",
+        "evidence": "if not DATE_SHAPE.match(day):",
+        "why_it_matters": "The docstring promises that only valid bookings reach the database, and the day column is TEXT, so nothing downstream rejects 2026-02-31 or 2026-13-45. The start time is parsed with strptime, which does reject impossible values; the day needs the same.",
+        "suggested_fix": "Parse the day with date.fromisoformat(day) and raise on ValueError."
+      }
+    ]
+  }
+}

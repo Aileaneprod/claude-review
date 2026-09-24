@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 4,
+  "session_id": "stub-16",
+  "structured_output": {
+    "findings": [
+      {
+        "path": ".github/workflows/test.yml",
+        "line": 25,
+        "severity": "blocking",
+        "title": "The unit tests step can no longer fail: without `shell:` the pipe takes tee's exit status",
+        "evidence": "run: npm test | tee test.log",
+        "why_it_matters": "A step with no `shell:` runs as `bash -e {0}` on GitHub-hosted Linux, without pipefail, so the job sees tee's status (0) and a failing test suite goes green. The lint step above is fine because `shell: bash` adds `-o pipefail`.",
+        "suggested_fix": "Add `shell: bash` to the unit tests step, as the lint step does."
+      }
+    ]
+  }
+}
