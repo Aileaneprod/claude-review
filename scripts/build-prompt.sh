@@ -18,6 +18,10 @@
 #   --prior-findings FILE  Markdown list of findings already posted on this PR.
 #   --repo-root DIR        Root of the repo under review, used to pick up its
 #                          own .claude-review/learnings.md. Default: current dir.
+#   --learnings FILE       The cross-repo lessons to inject instead of
+#                          prompts/learnings.md. The eval uses it to measure a
+#                          prompt with and without a lesson; an empty file
+#                          means none. Reviews never pass it.
 #   --out FILE             Where to write the assembled prompt.
 #
 # Memory: the reviewer's learnings come from two files, both optional —
@@ -42,6 +46,7 @@ changed_files=""
 profiles=""
 prior_findings=""
 repo_root="."
+global_learnings="${prompts_dir}/learnings.md"
 out_file=""
 triage=0
 
@@ -59,9 +64,10 @@ while [ "$#" -gt 0 ]; do
     --profiles)       [ "$#" -ge 2 ] || die "--profiles requires a value";       profiles="$2";       shift 2 ;;
     --prior-findings) [ "$#" -ge 2 ] || die "--prior-findings requires a value"; prior_findings="$2"; shift 2 ;;
     --repo-root)      [ "$#" -ge 2 ] || die "--repo-root requires a value";      repo_root="$2";      shift 2 ;;
+    --learnings)      [ "$#" -ge 2 ] || die "--learnings requires a value";      global_learnings="$2"; shift 2 ;;
     --out)            [ "$#" -ge 2 ] || die "--out requires a value";            out_file="$2";       shift 2 ;;
     --triage)         triage=1; shift ;;
-    -h|--help)        sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)        sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                die "unknown argument: $1" ;;
   esac
 done
@@ -96,7 +102,7 @@ python3 - \
   "$triage" \
   "$prior_findings" \
   "$out_file" \
-  "${prompts_dir}/learnings.md" \
+  "$global_learnings" \
   "${repo_root}/.claude-review/learnings.md" <<'PY'
 import json
 import os
