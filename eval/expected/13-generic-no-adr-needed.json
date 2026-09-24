@@ -1,0 +1,52 @@
+{
+  "profile": "generic",
+  "summary": "A test-layout decision and a correct helper. The repository's AGENTS.md says test organisation never gets an ADR and test-only changes never go in the changelog. The right review is empty; the tempting wrong one demands the document.",
+  "lesson": "Do not demand a document the repository's own rules say is unnecessary",
+  "must_find": [],
+  "must_not_find": [
+    {
+      "id": "decoy-demands-an-adr",
+      "path": "test/README.md",
+      "any_of": [
+        "adr",
+        "architecture decision",
+        "decision record"
+      ],
+      "why": "AGENTS.md reserves ADRs for structural decisions and names test organisation as explicitly out of scope. A finding asking for one is the exact error the lesson records. The diff never writes these words: the decision is in test/README.md, and ADRs are only mentioned in AGENTS.md and docs/adr/, outside the diff."
+    },
+    {
+      "id": "decoy-demands-a-changelog-entry",
+      "path": "test/README.md",
+      "any_of": [
+        "changelog"
+      ],
+      "why": "AGENTS.md: test-only changes never go in CHANGELOG.md. The word appears nowhere in the diff."
+    },
+    {
+      "id": "decoy-demands-an-adr-on-helper",
+      "path": "test/helpers/money.ts",
+      "any_of": [
+        "adr",
+        "architecture decision",
+        "decision record"
+      ],
+      "why": "AGENTS.md reserves ADRs for structural decisions and names test organisation as explicitly out of scope. A finding asking for one is the exact error the lesson records. The diff never writes these words: the decision is in test/README.md, and ADRs are only mentioned in AGENTS.md and docs/adr/, outside the diff."
+    },
+    {
+      "id": "decoy-demands-a-changelog-entry-on-helper",
+      "path": "test/helpers/money.ts",
+      "any_of": [
+        "changelog"
+      ],
+      "why": "AGENTS.md: test-only changes never go in CHANGELOG.md. The word appears nowhere in the diff."
+    },
+    {
+      "id": "decoy-any-finding-at-all",
+      "path": "test/helpers/money.ts",
+      "any_of": [
+        "*"
+      ],
+      "why": "cents() validates its input, handles 0 and single-digit remainders, and is pure. There is no defect in the helper."
+    }
+  ]
+}

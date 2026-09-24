@@ -1,0 +1,27 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+index d374f23..6e6c18f 100644
+--- a/.github/workflows/test.yml
++++ b/.github/workflows/test.yml
+@@ -13,8 +13,20 @@ jobs:
+           node-version: 22
+       - run: npm ci
+ 
++      # Keep the linter's output as an artifact, and still fail the job on a
++      # lint error: `shell: bash` makes GitHub run the step with pipefail.
+       - name: Lint
+-        run: npm run lint
++        shell: bash
++        run: npm run lint | tee lint.log
+ 
++      # Keep the test report as an artifact too.
+       - name: Unit tests
+-        run: npm test
++        run: npm test | tee test.log
++
++      - uses: actions/upload-artifact@v4
++        if: always()
++        with:
++          name: reports
++          path: |
++            lint.log
++            test.log

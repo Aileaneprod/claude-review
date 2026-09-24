@@ -1,0 +1,21 @@
+{
+  "profile": "generic",
+  "summary": "A generator of Luhn-valid SIRENs with a realistic prefix, in a directory whose README says every identifier is invented and must come from a checked list. A prose claim of invention proves nothing: the generated numbers share the registry's number space. The reserved example.test addresses are the decoy.",
+  "lesson": "A legal identifier is real until the repository shows where it came from",
+  "must_find": [
+    {
+      "id": "generated-sirens-unverified",
+      "path": "test/scenarios/make_companies.py",
+      "min_severity": "important",
+      "any_of": ["siren", "luhn", "810000", "prefix", "registry", "identifiers.md", "provenance", "real compan", "allocated"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-reserved-emails-are-fine",
+      "path": "test/scenarios/make_companies.py",
+      "any_of": ["email addresses are real", "real email", "emails are real", "email is personal", "email addresses may be real", "deliverable email", "emails could reach"],
+      "why": "example.test is reserved by RFC 6761 and the README says so: those addresses cannot belong to anyone. Flagging them means the reviewer treated every contact value alike instead of asking what establishes each one's provenance, which is what separates the emails (a reserved domain) from the SIRENs (nothing). No keyword is a string of the diff."
+    }
+  ]
+}

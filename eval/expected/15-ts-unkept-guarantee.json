@@ -1,0 +1,21 @@
+{
+  "profile": "node-typescript",
+  "summary": "The docstring promises three conditions for 'provisioned'; the code checks two. The third, a password hash, is never read, so the CLI reports success for an account that cannot sign in. The second condition is checked in a helper, which is the decoy.",
+  "lesson": "Count what the change promises, then find the promise the code does not keep",
+  "must_find": [
+    {
+      "id": "password-hash-never-checked",
+      "path": "src/provision.ts",
+      "min_severity": "important",
+      "any_of": ["password", "passwordhash", "third condition", "condition 3", "two of the three", "2 of 3", "cannot sign in"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-credential-check-is-in-helper",
+      "path": "src/provision.ts",
+      "any_of": ["credential account is not checked", "does not check the credential", "provider is not checked", "providerid is not checked", "no credential check", "missing credential check", "never checks the provider"],
+      "why": "Condition 2 is checked, in hasCredentialAccount, which the change adds and calls. Claiming it is missing means the reviewer ticked the list against isProvisioned's body alone and did not follow the call. Each keyword asserts the absence; the diff only contains the check itself."
+    }
+  ]
+}

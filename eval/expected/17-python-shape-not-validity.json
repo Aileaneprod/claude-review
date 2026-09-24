@@ -1,0 +1,21 @@
+{
+  "profile": "generic",
+  "summary": "A regex checks the SHAPE of a date, not its validity: 2026-02-31 has four digits, two and two, so it passes DATE_SHAPE and is stored in a TEXT column as a valid booking. The start time is parsed with strptime, which does reject impossible values, and is the decoy.",
+  "lesson": "A check is only as good as the stage it sits in",
+  "must_find": [
+    {
+      "id": "date-shape-admits-impossible-dates",
+      "path": "app/booking.py",
+      "min_severity": "important",
+      "any_of": ["date_shape", "02-31", "02-30", "13-", "impossible date", "invalid date", "nonexistent date", "non-existent date", "shape", "fromisoformat", "not a real date"]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-start-time-is-validated",
+      "path": "app/booking.py",
+      "any_of": ["start is not validated", "start time is not validated", "start is unvalidated", "strptime does not", "start accepts invalid", "start accepts impossible", "time is not checked", "25:99"],
+      "why": "datetime.strptime(start, \"%H:%M\") raises on 25:99 or 09:75, so the start time is validated for real, the contrast the lesson draws. Flagging it means the reviewer judged both fields by their appearance. No keyword is a string of the diff."
+    }
+  ]
+}

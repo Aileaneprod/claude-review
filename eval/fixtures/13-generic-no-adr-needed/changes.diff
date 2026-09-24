@@ -1,0 +1,38 @@
+diff --git a/test/README.md b/test/README.md
+new file mode 100644
+index 0000000..600f2e0
+--- /dev/null
++++ b/test/README.md
+@@ -0,0 +1,11 @@
++# Test layout
++
++From this change on, tests are organised in three layers:
++
++- `test/helpers/` — pure functions shared by tests (formatting, builders).
++- `test/fixtures/` — anything that touches I/O or the clock.
++- `test/scenarios/` — seed data for integration tests, one directory per
++  scenario.
++
++`test/utils/` is retired: new code must not add to it, and its remaining
++files move into the layers above as they are touched.
+diff --git a/test/helpers/money.ts b/test/helpers/money.ts
+new file mode 100644
+index 0000000..ab5ff3d
+--- /dev/null
++++ b/test/helpers/money.ts
+@@ -0,0 +1,15 @@
++/**
++ * Test helper: format an amount in minor units the way invoice fixtures print
++ * it, so assertions compare strings the reader can check by eye.
++ *
++ *   cents(4900) === "49.00"
++ *   cents(5)    === "0.05"
++ */
++export function cents(minorUnits: number): string {
++  if (!Number.isInteger(minorUnits) || minorUnits < 0) {
++    throw new RangeError(`expected a non-negative integer, got ${minorUnits}`);
++  }
++  const whole = Math.floor(minorUnits / 100);
++  const rest = minorUnits % 100;
++  return `${whole}.${rest.toString().padStart(2, "0")}`;
++}

@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-12",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "test/scenarios/seed.sql",
+        "line": 14,
+        "severity": "important",
+        "title": "Account 3 is seeded as never activated but has a paid invoice",
+        "evidence": "(301, 3, 'paid', 4900, '2026-03-15 00:00:00+00', '2026-03-16 09:40:00+00'),",
+        "why_it_matters": "README.md says account 3 never had service delivered, so nothing may have been billed or paid. The row is referentially valid and dated after the account, so scenario-integrity passes, yet the two tables assert opposite facts and every test built on scenario 3 tests a state that cannot exist.",
+        "suggested_fix": "Remove invoice 301, or add a check that an account in never_activated has no paid invoice."
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+"""Booking requests, validated before they are stored."""
+
+import re
+from datetime import datetime
+
+DATE_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_booking(payload: dict) -> dict:
+    """Validate a booking request.
+
+    Raises ValueError when a field is invalid, so that only valid bookings
+    reach the database. The returned dict is written as-is to the `bookings`
+    table, whose `day` column is TEXT.
+    """
+    day = payload.get("day", "")
+    if not DATE_SHAPE.match(day):
+        raise ValueError("day must be a date, YYYY-MM-DD")
+
+    start = payload.get("start", "")
+    try:
+        start_time = datetime.strptime(start, "%H:%M").time()
+    except ValueError:
+        raise ValueError("start must be a time, HH:MM") from None
+
+    return {"day": day, "start": start_time.isoformat(timespec="minutes")}
