@@ -38,34 +38,38 @@ profile: auto
 # every review in every repository with no commit here. Measured on 2026-09-22,
 # the default was claude-sonnet-5.
 #
-# The second is that this is a deliberate upgrade, to the strongest model the
-# CLI that runs reviews KNOWS. That is not the newest model: claude-code-action@v1
-# pins Claude Code 2.1.278, which rejects claude-opus-5-5 before any request
-# (`unrecognized_model`, measured 2026-09-23 on that exact binary, and on every
-# fixture of the live eval). `opus` resolves to claude-opus-5 there. Move to a
-# newer model only once the action's pinned CLI accepts it — run the live eval
-# (.github/workflows/eval.yml, pinned to the same CLI) and it will say so.
+# The second is that this is a deliberate upgrade, to claude-opus-5-5: newer
+# than claude-opus-5 and cheaper per token ($4 / $20 per MTok against $5 / $25).
+# It is only usable because claude-code-action@v1 now pins Claude Code 2.1.281.
+# Its earlier pin, 2.1.278, rejected claude-opus-5-5 before any request
+# (`unrecognized_model`, on every fixture of the live eval, 2026-09-23), and
+# this file shipped claude-opus-5 in the meantime. The model must be one the
+# action's pinned CLI KNOWS: run the live eval before changing it —
+# .github/workflows/eval.yml installs the same CLI the action does.
 #
-# Opus costs more per token than Sonnet, and reviews run on a subscription
-# whose weekly limit was hit on 2026-09-17 and again on 2026-09-22 at the old
-# model. Expect the limit to arrive sooner. The fallback credential in
-# review.yml exists for that, and so does lowering `effort` below.
+# Opus still costs twice Sonnet per token ($2 / $10), and reviews run on a
+# subscription whose limit was hit on 2026-09-17, 2026-09-22 and — on
+# claude-opus-5, at about $4 a review — again on 2026-09-23. Expect it. The
+# fallback credential in review.yml exists for that, and so does lowering
+# `effort` below.
 #
 # The value is validated as an identifier by resolve-config.sh — it becomes a
 # command-line argument, so it cannot be allowed to carry another one. Model IDs
 # change; see docs/TUNING.md before editing.
-model: claude-opus-5
+model: claude-opus-5-5
 
-# Reasoning effort: low, medium, high, xhigh, max. Empty means the model's own
-# default, which on claude-opus-5 is `high`.
+# Reasoning effort: low, medium, high, xhigh, max. `medium` is
+# claude-opus-5-5's own default, written down so it is a decision and not an
+# accident — an empty value would follow whatever the model's default becomes.
 #
-# `xhigh` is what a Claude Code "ultracode" session runs at, minus the
-# multi-agent orchestration that has no meaning for an unattended review.
-# Checked on CLI 2.1.278 with claude-opus-5 before being set here. `max` sits
-# above it and costs more thinking per turn; raise to it only once a live eval
-# shows headroom at `xhigh`. This is the first lever to pull if quota gets tight
-# — `high` gives back a large share of the spend.
-effort: xhigh
+# Chosen for cost, on evidence. At `xhigh` on claude-opus-5 a korbyx review
+# cost $3.60 to $4.90 against about $1.20 on Sonnet 5, and the subscription's
+# limit was reached within hours of the switch (2026-09-23). `medium` on the
+# newer, cheaper model is the bet that quality holds for a fraction of that;
+# the live eval is what says whether it does. Raise to `high`, then `xhigh`,
+# only if it shows findings being missed. There is no `ultra` level: that is a
+# Claude Code session mode, and its effort is `xhigh`.
+effort: medium
 
 # Maximum agentic turns for a single review. The main lever on cost per review.
 #

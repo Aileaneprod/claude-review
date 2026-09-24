@@ -44,11 +44,24 @@ jobs:
       # drives the `claude` CLI directly, which has to come from somewhere.
       - name: Install the Claude Code CLI
         if: inputs.live
-        # Pinned to the version claude-code-action@v1 installs for real reviews
-        # (`claudeCodeVersion` in its src/entrypoints/run.ts). An eval on a
-        # newer CLI than production can pass on a flag or a default production
-        # does not have. Move the two together.
-        run: npm install -g @anthropic-ai/claude-code@2.1.278
+        # The version claude-code-action@v1 installs for real reviews, read from
+        # the action itself (`claudeCodeVersion` in src/entrypoints/run.ts) on
+        # every run. It used to be a number written here by hand, and the
+        # action bumps its pin every few days: an eval on a different CLI from
+        # production can pass on a model or a flag production does not have.
+        # That is exactly how claude-opus-5-5 reached a merged PR on 2026-09-23
+        # while the production CLI rejected it. No version found fails the
+        # step: an eval on a guessed CLI measures nothing.
+        run: |
+          set -euo pipefail
+          version="$(curl -fsSL --retry 3 https://raw.githubusercontent.com/anthropics/claude-code-action/v1/src/entrypoints/run.ts \
+            | sed -n 's/.*claudeCodeVersion = "\([0-9][0-9.]*\)".*/\1/p' | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error title=Unknown CLI version::could not read claudeCodeVersion from claude-code-action@v1"
+            exit 1
+          fi
+          echo "Installing Claude Code ${version}, the version claude-code-action@v1 runs reviews on."
+          npm install -g "@anthropic-ai/claude-code@${version}"
 
       - name: Run the harness
         env:
