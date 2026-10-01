@@ -1,0 +1,185 @@
+# Replay the reviews an outage swallowed, before anyone notices they are gone.
+#
+# On 2026-09-17 the subscription behind CLAUDE_CODE_OAUTH_TOKEN hit its usage
+# limit. Four Aileaneprod/korbyx pull requests (#228-#231) came back
+# `api_error_status 429` and stayed unreviewed until a person happened to look
+# the next morning: the wrapper in each repository listens to `pull_request`
+# only, so a review returns on the NEXT push, and a branch whose work is
+# finished never pushes again. scripts/rereview-open-prs.sh turned that
+# catch-up into one command. This turns it into nobody's job.
+#
+# WHY DAILY, AND AT 06:17 UTC.
+#
+# Daily is the cadence the incident argues for: the person who noticed those
+# four noticed the next morning, so a pass that lands before the working day
+# is already faster than the process it replaces, and the reviews are waiting
+# when people arrive. 06:17 UTC is ~07:17 in Tunis and Paris — ahead of the
+# day's first pushes, so a replay is not racing a live review that the
+# `cancel-in-progress` guard in review.yml would then cancel. The odd minute is
+# deliberate: GitHub queues scheduled runs and the top of the hour is the most
+# contended slot, so `0 6` would drift by the most.
+#
+# Why not hourly. A replay that fails for the SAME reason the original failed
+# re-marks the pull request `neutral` (review.yml's "Report that the review was
+# unavailable" step republishes the check), so the next pass picks it up again
+# — which is exactly the property that makes an outage lasting into tomorrow
+# self-healing, and exactly the property that turns a short cadence into a
+# treadmill. While quota stays exhausted, this pass costs `budget` replays per
+# firing, forever. Hourly would make that 24x. Daily bounds the worst case at
+# ten reviews a day, which is under one busy day of ordinary pushes on korbyx
+# and is visible in the summary the moment anyone looks.
+#
+# Why not weekly. A week of unreviewed pull requests is a week of merges made
+# on a green check that means nothing, which is how Aileaneprod/korbyx#131 got
+# merged unreviewed in the first place.
+#
+# WHAT THIS CANNOT CATCH UP. GitHub refuses to re-run a workflow run more than
+# 30 days old, so a pull request that went unreviewed and then sat out the
+# month cannot be replayed at all: rereview-open-prs.sh reports the refusal and
+# moves on, and a refused replay costs no quota because only replays that
+# actually started are charged against the budget. It bounds the treadmill from
+# the far end, and it means this is a safety net over the last month rather
+# than a sweep of everything still open.
+#
+# WHY A BUDGET AND NOT JUST `--limit`. Quota is the scarce resource in this
+# design (docs/ARCHITECTURE.md) and each replay costs a full review. `--limit`
+# bounds one repository; the budget bounds the pass, so a repository with a
+# backlog of thirty cannot spend everything before the next name on the list is
+# reached. 5 per repository covers the incident that prompted this (four) with
+# headroom; 10 for the pass covers two repositories hit at once. These are the
+# first two numbers to lower if quota gets tight, and lowering them costs only
+# latency: what is not replayed today is still `neutral` tomorrow.
+#
+# TWO THINGS TO KNOW ABOUT SCHEDULES. A `schedule:` trigger only ever runs the
+# file on the DEFAULT branch, so nothing here fires until this is merged. And
+# GitHub disables scheduled workflows in a public repository after 60 days
+# without commits — if the catch-up goes quiet, check that first.
+
+name: Review catch-up
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      rerun:
+        description: "Replay the runs (off = report only, costs nothing)"
+        type: boolean
+        default: false
+      budget:
+        description: "Maximum replays across the whole pass"
+        type: string
+        default: "10"
+      limit:
+        description: "Maximum replays per repository"
+        type: string
+        default: "5"
+      repos:
+        description: >-
+          Comma-separated OWNER/REPO to sweep instead of the configured list.
+          For the outage you are looking at right now. Blank = config/rereview-repos.txt.
+        type: string
+        default: ""
+
+# Never two passes at once. `cancel-in-progress: false` on purpose: a pass
+# cancelled halfway has already spent part of the budget and recorded none of
+# it, so the queued run would start over from a budget it does not have.
+concurrency:
+  group: claude-review-catch-up
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  catch-up:
+    name: ${{ (github.event_name == 'schedule' || inputs.rerun) && 'Replay unreviewed pull requests' || 'Report unreviewed pull requests' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # GUARD — no usable credential, same shape as review.yml's guard 7 and
+      # for the same reason: stop cheaply, say what is missing, and do not fail
+      # a repository that never opted into this.
+      #
+      # This repository's own GITHUB_TOKEN cannot do the work. `gh run rerun`
+      # needs `actions: write` on the TARGET repository, and a workflow token
+      # is scoped to the repository it runs in — so a cross-repository replay
+      # needs a token of its own. docs/SETUP.md names the exact scopes.
+      - name: Guard — catch-up credential present
+        id: credential
+        env:
+          REREVIEW_GITHUB_TOKEN: ${{ secrets.REREVIEW_GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REREVIEW_GITHUB_TOKEN:-}" ]; then
+            printf 'present=false\n' >> "$GITHUB_OUTPUT"
+            {
+              echo "### Review catch-up skipped — no credential"
+              echo
+              echo "\`REREVIEW_GITHUB_TOKEN\` is not set on this repository, so the"
+              echo "catch-up cannot read or replay anything in the target repositories."
+              echo "Nothing was attempted and no quota was spent."
+              echo
+              echo "It needs a fine-grained PAT scoped to the repositories in"
+              echo "\`config/rereview-repos.txt\`, with **Actions: read and write**"
+              echo "(that is what replays a run) plus read-only **Contents**,"
+              echo "**Pull requests**, **Checks** and **Metadata**."
+              echo
+              echo "Fix: \`gh secret set REREVIEW_GITHUB_TOKEN --repo $GITHUB_REPOSITORY\`"
+              echo "See \"Catching up after an outage\" in claude-review's docs/SETUP.md."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning title=Review catch-up skipped::REREVIEW_GITHUB_TOKEN is not set on this repository"
+          else
+            printf 'present=true\n' >> "$GITHUB_OUTPUT"
+            echo "Credential present."
+          fi
+
+      - name: Sweep the repositories
+        if: steps.credential.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.REREVIEW_GITHUB_TOKEN }}
+          # A scheduled run has no `inputs` context at all, so every one of
+          # these arrives empty and the defaults below are what actually
+          # govern the nightly pass. They are restated here rather than read
+          # from the input defaults because GitHub does not substitute those
+          # for a `schedule` event.
+          IN_RERUN: ${{ inputs.rerun }}
+          IN_BUDGET: ${{ inputs.budget }}
+          IN_LIMIT: ${{ inputs.limit }}
+          IN_REPOS: ${{ inputs.repos }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          # The schedule always replays. A scheduled pass that only reported
+          # would write its findings into a job summary nobody opens, which is
+          # the situation this workflow exists to end. A human running it by
+          # hand gets the script's own bias instead: report first, act second.
+          if [ "$EVENT" = "schedule" ] || [ "$IN_RERUN" = "true" ]; then
+            rerun=1
+          else
+            rerun=0
+          fi
+
+          budget="${IN_BUDGET:-}"; [ -n "$budget" ] || budget=10
+          limit="${IN_LIMIT:-}";   [ -n "$limit" ]   || limit=5
+
+          args=(--budget "$budget" --limit "$limit")
+          [ "$rerun" -eq 0 ] || args+=(--rerun)
+
+          # An explicit list beats the file. One repository is down, you know
+          # which one, and you do not want the other names on the roster eating
+          # the budget while you watch.
+          if [ -n "${IN_REPOS:-}" ]; then
+            printf '%s' "$IN_REPOS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
+              > "$RUNNER_TEMP/repos.txt"
+            args+=(--repos "$RUNNER_TEMP/repos.txt")
+            echo "Sweeping the repositories given on the dispatch, not the configured list:"
+            cat "$RUNNER_TEMP/repos.txt"
+          fi
+
+          # The report is Markdown on stdout and belongs in both places: the
+          # summary is where the `checks: write` blind spot has to land, and the
+          # log is what survives once the summary is a wall of text.
+          ./scripts/rereview-all.sh "${args[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
