@@ -375,3 +375,56 @@ assert_contains '`CLAUDE_CODE_OAUTH_TOKEN` secret' \
   "the comment names the first secret" -- cat "$box/posted"
 assert_not_contains "CLAUDE_CODE_OAUTH_TOKEN_FALLBACK" \
   "and does not mention a fallback that never ran" -- cat "$box/posted"
+
+# --- what a caller may record about the run ------------------------------------
+
+it "says a review happened only when the summary landed"
+# The job's result is `success` when the credential is missing, when nothing is
+# left to review and when the reviewer did not complete, so a caller that logs
+# "reviewed" off the result logs it for reviews that never happened (korbyx
+# KOR-719). `reviewed` has to come from the summary step's `posted`, through
+# the job's outputs, because a reusable workflow exposes nothing else.
+_wiring() {
+  python3 - "$_WORKFLOW" "$1" <<'PY'
+import io
+import re
+import sys
+
+path, what = sys.argv[1:3]
+text = io.open(path, encoding="utf-8").read()
+if what == "workflow":
+    head = text.split("\nconcurrency:", 1)[0]
+    block = re.search(r"(?ms)^    outputs:\n(.*?)(?=^\S|\Z)", head)
+    pairs = re.findall(r"(?m)^      ([a-z_]+):\n(?:        (?!value:).*\n)*        value: (.*)$",
+                       block.group(1) if block else "")
+else:
+    job = re.search(r"(?ms)^  review:\n(.*?)(?=^  [a-z-]+:\n)", text).group(1)
+    block = re.search(r"(?ms)^    outputs:\n((?:      .*\n)+)", job)
+    pairs = re.findall(r"(?m)^      ([a-z_]+): (.*)$", block.group(1) if block else "")
+print("\n".join("%s=%s" % p for p in pairs) or "(none)")
+PY
+}
+assert_contains 'reviewed=${{ jobs.review.outputs.reviewed }}' \
+  "the workflow exposes reviewed from the review job" -- _wiring workflow
+assert_contains 'tooling_sha=${{ jobs.review.outputs.tooling_sha }}' \
+  "and the claude-review commit" -- _wiring workflow
+assert_contains 'duration_seconds=${{ jobs.review.outputs.duration_seconds }}' \
+  "and the duration" -- _wiring workflow
+assert_equal \
+  "reviewed=\${{ steps.summary.outputs.posted == 'true' && 'true' || 'false' }}" \
+  "$(_wiring job | grep '^reviewed=')" \
+  "the job's reviewed is the summary's posted, false when it is empty"
+assert_equal "always()" "$(_step duration if)" "the duration is measured whatever the outcome"
+assert_equal "(absent)" "$(_step start if)" "and its start is recorded unconditionally"
+
+it "measures the duration from the recorded start, and nothing without one"
+box="$(_sandbox duration)"
+_run_step duration "$box" START="$(( $(date +%s) - 42 ))"
+seconds="$(_output "$box" seconds)"
+case "$seconds" in
+  42|43) _ok "a run started 42 s ago lasted 42 s" ;;
+  *) _bad "a run started 42 s ago lasted 42 s" "got $seconds" ;;
+esac
+box="$(_sandbox duration-none)"
+_run_step duration "$box" START=
+assert_equal "(unset)" "$(_output "$box" seconds)" "no start, no duration rather than a made-up one"

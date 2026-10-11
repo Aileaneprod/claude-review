@@ -147,6 +147,31 @@ on:
           says so and reviews the change on its own terms — the same behaviour
           as before this input existed.
         required: false
+    # What a caller may record about this run. The job's own `result` cannot
+    # say whether a review happened: it is `success` when the credential is
+    # missing, when nothing is left to review, and when the reviewer did not
+    # complete, because every one of those ends in a notice, not a failure.
+    # Mapped through the job's outputs, as a reusable workflow requires.
+    outputs:
+      reviewed:
+        description: >-
+          "true" only when this run's summary comment landed on the pull
+          request, which post-review.sh alone can witness. "false" in every
+          other case the job ran, and empty when it was skipped (draft, bot,
+          label, fork). Key a "the pull request was reviewed" record on
+          `== 'true'`, never on the job's result.
+        value: ${{ jobs.review.outputs.reviewed }}
+      tooling_sha:
+        description: >-
+          The claude-review commit whose scripts and prompts this run used,
+          resolved from the checkout of `tooling_ref`. Empty when nothing was
+          checked out.
+        value: ${{ jobs.review.outputs.tooling_sha }}
+      duration_seconds:
+        description: >-
+          Wall-clock seconds from the job's first step to its last, whatever
+          the outcome. Empty when the job was skipped.
+        value: ${{ jobs.review.outputs.duration_seconds }}
 
 # GUARD 0 — cancel superseded runs.
 # A push to a PR that is already being reviewed makes the in-flight review
@@ -204,6 +229,13 @@ jobs:
     # depends on it. scripts/test/cases/review-steps.sh plants the `json.py`.
     env:
       PYTHONSAFEPATH: "1"
+    # The workflow's `outputs:` read these. `reviewed` is spelled out as a
+    # comparison so that an empty `posted` (summary step skipped or refused)
+    # reads `false`, not empty, whenever the job ran.
+    outputs:
+      reviewed: ${{ steps.summary.outputs.posted == 'true' && 'true' || 'false' }}
+      tooling_sha: ${{ steps.tooling.outputs.sha }}
+      duration_seconds: ${{ steps.duration.outputs.seconds }}
     # NO `permissions:` block here, on purpose, and it is not an omission.
     #
     # A block in a CALLED workflow is exhaustive: whatever it does not list is
@@ -224,6 +256,12 @@ jobs:
     # now the single place that says what this token may do, which is what its
     # own header already claimed.
     steps:
+      # The start of `duration_seconds`. First, so a run that stops at the
+      # credential guard still has a duration.
+      - name: Record the start time
+        id: start
+        run: printf 'epoch=%s\n' "$(date +%s)" >> "$GITHUB_OUTPUT"
+
       # GUARD 7 — no usable credential.
       #
       # If CLAUDE_CODE_OAUTH_TOKEN is not set on the calling repository it
@@ -300,6 +338,13 @@ jobs:
           repository: ${{ steps.self.outputs.repo }}
           ref: ${{ steps.self.outputs.ref }}
           path: .claude-review-tooling
+
+      # `tooling_ref` is a moving tag for most callers; the commit it resolved
+      # to is what a caller can pin a record to.
+      - name: Resolve the claude-review commit
+        id: tooling
+        if: steps.credential.outputs.present == 'true'
+        run: printf 'sha=%s\n' "$(git -C .claude-review-tooling rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Collect workflow inputs
         id: overrides
@@ -1246,6 +1291,21 @@ jobs:
               sys.exit(1)
           print("No blocking findings.")
           PY
+
+      # Last, and `always()`: a blocking-findings failure or a failed step still
+      # leaves a duration. A run cancelled by a newer push has no caller left to
+      # read it.
+      - name: Measure the duration
+        id: duration
+        if: always()
+        env:
+          START: ${{ steps.start.outputs.epoch }}
+        run: |
+          set -euo pipefail
+          case "${START:-}" in
+            ''|*[!0-9]*) echo "No start time recorded; no duration." ;;
+            *) printf 'seconds=%s\n' "$(( $(date +%s) - START ))" >> "$GITHUB_OUTPUT" ;;
+          esac
 
   # ---------------------------------------------------------------------------
   # GUARD 4 — fork pull requests.
