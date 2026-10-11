@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-20",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/units.ts",
+        "line": 25,
+        "severity": "blocking",
+        "title": "A unit with a null status is classified status_written, and the guard only counts, so it is loaded as NULL",
+        "evidence": "outcome: \"status_written\",",
+        "why_it_matters": "classify() records the missing status only in statusPresent. planLoad compares the number of status_written outcomes with the number of units and never reads statusPresent, so the load goes ahead with NULL statuses, which the docstring says must stop it.",
+        "suggested_fix": "Classify a null status as rejected, or make the guard require statusPresent on every unit."
+      }
+    ]
+  }
+}

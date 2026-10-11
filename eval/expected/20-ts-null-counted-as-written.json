@@ -1,0 +1,37 @@
+{
+  "profile": "node-typescript",
+  "summary": "classify() marks a unit with a null status as status_written and only records the absence in statusPresent. planLoad's guard counts outcomes, never statusPresent, so a unit without a status is loaded as NULL, which the docstring says must stop the load. The missing-id rejection is correct and is the decoy.",
+  "origin": "a real miss: a guard compared counts of 'written' rows while a null value was classified as written",
+  "must_find": [
+    {
+      "id": "null-status-counted-as-written",
+      "path": "src/units.ts",
+      "min_severity": "important",
+      "any_of": [
+        "statuspresent",
+        "null status",
+        "status is null",
+        "status: null",
+        "without a status",
+        "missing status",
+        "lacks a status",
+        "status_written"
+      ]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-missing-id-is-rejected",
+      "path": "src/units.ts",
+      "any_of": [
+        "id is not validated",
+        "empty id is accepted",
+        "missing id is accepted",
+        "id check is missing",
+        "unit without an id is loaded",
+        "no id check"
+      ],
+      "why": "A unit with no id is rejected, counted as not written, and stops the load: that path is correct. Flagging it means the reviewer read the guard's count without following what each outcome means. No keyword is a string of the diff."
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "profile": "node-typescript,postgres",
+  "summary": "The occurrence is read before the plan row lock is taken. Under READ COMMITTED a request that waited for the lock still holds the due date it read before waiting, so the 'unchanged' guard and the event log use a stale value. cancelOccurrence takes the lock first and reads after, which is the decoy.",
+  "origin": "a real miss: the reviewer filed nothing on a read-before-FOR-UPDATE race that another reviewer and a human both caught",
+  "must_find": [
+    {
+      "id": "read-before-lock",
+      "path": "src/plans.ts",
+      "min_severity": "important",
+      "any_of": [
+        "before.due_on",
+        "stale",
+        "before the lock",
+        "read before",
+        "race",
+        "rescheduleoccurrence",
+        "re-read",
+        "reread",
+        "after the lock"
+      ]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-cancel-reads-after-lock",
+      "path": "src/plans.ts",
+      "any_of": [
+        "in cancelOccurrence",
+        "cancelOccurrence reads",
+        "cancelOccurrence is racy",
+        "cancelOccurrence has a race",
+        "cancelOccurrence is not",
+        "cancel also"
+      ],
+      "why": "cancelOccurrence takes the plan lock and only then reads the occurrence, so it sees a concurrent reschedule. Flagging it means the reviewer matched on the lock pattern without checking the order of statements. Every keyword asserts something about cancelOccurrence; the diff only writes `cancelOccurrence(`."
+    }
+  ]
+}
