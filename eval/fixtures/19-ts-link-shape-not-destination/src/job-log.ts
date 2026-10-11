@@ -9,7 +9,6 @@ export interface JobLine {
   outcome: "success" | "failure";
 }
 
-// https://github.com/<owner>/<repo>/<anything>
 const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_/-]+$/;
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 

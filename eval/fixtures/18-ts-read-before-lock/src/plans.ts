@@ -3,10 +3,9 @@ import { Tx, UnchangedDueDate } from "./db";
 /**
  * Move an occurrence to a new due date.
  *
- * Two people can reschedule occurrences of the same plan at the same time. The
- * plan row lock serialises them: whoever gets it second waits, then sees the
- * first one's change. A request for the date the occurrence already has is
- * refused, and every real move writes exactly one `due_reported` event.
+ * Concurrent reschedules of one plan are serialised by the plan row lock. A
+ * request for the date the occurrence already has is refused, and every real
+ * move writes exactly one `due_reported` event.
  */
 export async function rescheduleOccurrence(
   tx: Tx,
@@ -32,8 +31,7 @@ export async function rescheduleOccurrence(
 }
 
 /**
- * Cancel an occurrence. Same lock, and the occurrence is read once the lock is
- * held, so a concurrent reschedule is seen.
+ * Cancel an occurrence.
  */
 export async function cancelOccurrence(tx: Tx, planId: string, occurrenceId: string): Promise<void> {
   await tx.none("SELECT id FROM plans WHERE id = $1 FOR UPDATE", [planId]);
