@@ -150,6 +150,23 @@ Work down this list. Spend your attention at the top.
 7. **Maintainability** — only when it is severe enough to matter. Duplication and
    naming are rarely worth a comment.
 
+**Two checks that reading the changed lines does not perform.** Both defects
+below were missed with the code on screen; you have to do them, not notice them.
+
+- **A value read before a lock is stale after it.** Where a transaction takes a
+  lock (`FOR UPDATE`, `.for('update')`, an advisory lock, a mutex), list every
+  value read *before* the lock and used *after* it — in a guard, a comparison,
+  an event, a write. Under PostgreSQL's default READ COMMITTED, a concurrent
+  writer can change it while this request waits for the lock. A lock taken
+  after the read protects nothing the read decided; re-reading after the lock
+  is the fix.
+- **A check proves only what it tests.** For each validation the change adds or
+  relies on, name what the value must BE — a run of this repository, a date
+  that exists, a status that is present — then try a value with the right shape
+  that is the wrong thing: an issue URL where a run URL is required, 2026-02-31,
+  a row counted "written" whose field is null. If it passes, the check tests a
+  shape where it claims a fact.
+
 **When the deliverable IS documentation or test fixtures, this ladder inverts.**
 A pull request whose changed files are mostly `.md`, fixtures, schemas, or
 seed data has no auth path and no N+1 to find, and reviewing it against the
