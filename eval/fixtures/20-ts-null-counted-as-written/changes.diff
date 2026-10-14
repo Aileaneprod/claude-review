@@ -1,0 +1,44 @@
+diff --git a/src/units.ts b/src/units.ts
+new file mode 100644
+index 0000000..8bc5b0b
+--- /dev/null
++++ b/src/units.ts
+@@ -0,0 +1,38 @@
++/**
++ * Load business units from the source export into a fresh database. Every unit
++ * must arrive WITH its status: the projections that run next assume none is
++ * NULL. If the export lacks a status, the load stops before writing anything.
++ */
++export interface SourceUnit {
++  id: string;
++  name: string;
++  status: "open" | "closed" | null;
++}
++
++export interface Classified {
++  id: string;
++  outcome: "status_written" | "rejected";
++  statusPresent: boolean;
++  status: SourceUnit["status"];
++}
++
++export function classify(unit: SourceUnit): Classified {
++  if (!unit.id) {
++    return { id: unit.id, outcome: "rejected", statusPresent: false, status: null };
++  }
++  return {
++    id: unit.id,
++    outcome: "status_written",
++    statusPresent: unit.status !== null,
++    status: unit.status,
++  };
++}
++
++export function planLoad(units: SourceUnit[]): Classified[] {
++  const classified = units.map(classify);
++  const written = classified.filter((c) => c.outcome === "status_written").length;
++  if (written !== units.length) {
++    throw new Error(`refusing to load: ${units.length - written} unit(s) rejected`);
++  }
++  return classified;
++}

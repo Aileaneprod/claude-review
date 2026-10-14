@@ -1,0 +1,39 @@
+{
+  "profile": "node-typescript",
+  "summary": "RUN_URL checks that `run` is a github.com URL of some repository with some path, not that it is a workflow run of this repository. An issue or pull request link passes and is rendered as 'see the run'. The commit SHA check is exact and is the decoy.",
+  "origin": "a real miss: a link validated by its shape accepted an issue URL where a run URL was required",
+  "must_find": [
+    {
+      "id": "run-url-any-destination",
+      "path": "src/job-log.ts",
+      "min_severity": "important",
+      "any_of": [
+        "issue",
+        "pull request",
+        "/pull/",
+        "actions/runs",
+        "any repository",
+        "any path",
+        "destination",
+        "other repositor",
+        "not a workflow run"
+      ]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-commit-sha-is-exact",
+      "path": "src/job-log.ts",
+      "any_of": [
+        "commit is not validated",
+        "sha is not checked",
+        "commit accepts",
+        "short sha is accepted",
+        "commit_sha is too",
+        "sha validation is weak",
+        "commit can be"
+      ],
+      "why": "COMMIT_SHA is anchored and exact: forty lowercase hex characters, nothing else. Flagging it means the reviewer judged both regexes by their appearance. No keyword is a string of the diff."
+    }
+  ]
+}
