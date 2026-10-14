@@ -1,0 +1,27 @@
+{
+ "data": {
+  "issues": {
+   "nodes": [
+    {
+     "identifier": "KOR-238",
+     "title": "Fix the export the agency reported",
+     "state": {
+      "name": "In Progress"
+     },
+     "description": "Client Dupont, agence de Lyon, cannot open the monthly export.\n\nThe file must open in the spreadsheet the agency uses.",
+     "url": "https://linear.app/korbyx/issue/KOR-238",
+     "labels": {
+      "nodes": [
+       {
+        "name": "Bug"
+       },
+       {
+        "name": "retour-client"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}

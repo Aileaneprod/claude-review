@@ -1,0 +1,24 @@
+{
+ "data": {
+  "issues": {
+   "nodes": [
+    {
+     "identifier": "KOR-238",
+     "title": "Wait for the agency to confirm the export format",
+     "state": {
+      "name": "Todo"
+     },
+     "description": "Client Martin, agence de Nantes, has not confirmed the column order yet.",
+     "url": "https://linear.app/korbyx/issue/KOR-238",
+     "labels": {
+      "nodes": [
+       {
+        "name": " Attente-Client "
+       }
+      ]
+     }
+    }
+   ]
+  }
+ }
+}
