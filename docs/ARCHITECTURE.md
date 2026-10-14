@@ -343,7 +343,11 @@ What that would publish is a transcript: the assembled prompt, the `gh pr diff`
 output, the full text of every file the reviewer opened, and the Linear ticket
 where `fetch-ticket.sh` found one — private content on a repository whose code
 is not. **Actions redacts secrets from logs; it does not redact a file uploaded
-as an artifact.**
+as an artifact.** For a ticket labelled `retour-client` or `attente-client`,
+or one whose labels cannot be read, `fetch-ticket.sh` writes only its
+identifier and why it was withheld: its title, state and description do not
+come from that step. The pull request title and branch name are outside its
+control, and a branch Linear generates carries the ticket title as a slug.
 
 Hence `archive_public_trace`, default false: a private caller archives silently,
 a public one does not archive until it says so in its own `with:`, where a human

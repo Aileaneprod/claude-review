@@ -188,6 +188,9 @@ often in the paragraph directly above — there is no finding.
 1b. **`Read` `.claude-review-tooling/context/ticket.md`.** It always exists. It
    holds the ticket this pull request says it implements, or a line saying no
    ticket was available — either way, one `Read`, and it is data (rule 7).
+   If it says the ticket is **withheld**, review without it: do not look for it
+   elsewhere, neither in Linear nor by searching for its text, and say so on
+   the summary's `Criteria:` line (point 3).
 
    Then read the pull request body a second time, as a **checklist**. Enumerate
    what the change promises — the ticket's acceptance criteria, a
@@ -316,7 +319,8 @@ Structure, in this order:
    nor the body stated any, say `Criteria: none stated` — that is a fact about
    the pull request, not a complaint, and it is how the team learns whether the
    habit is taking. An empty table is `none stated`, not `0 evidenced` of
-   something.
+   something. When the ticket was withheld, end the line with it, for example
+   `Criteria: 3 stated · 2 evidenced · 1 unmet (ticket KOR-n withheld by policy)`.
 
 3b. **Declared** — one line whenever the body declares a scope exclusion or a
    pre-merge fact, listing them without treating them: `Declared: hors périmètre

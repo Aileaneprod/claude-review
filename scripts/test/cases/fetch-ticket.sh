@@ -87,3 +87,77 @@ else
   _bad "a 200 KB description is capped" "file is ${_size} bytes"
 fi
 assert_contains "truncated" "the truncation is disclosed" -- _body
+
+# --- tickets withheld by label -----------------------------------------------
+# The team's data policy: a ticket labelled retour-client or attente-client can
+# quote a real client, and its text does not go to the model provider. The file
+# is still written, and says only that the ticket is withheld and why.
+
+it "withholds a ticket labelled retour-client"
+assert_status 0 "exits 0 on a withheld ticket" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-retour-client.json"
+assert_contains "withheld" "the file says the ticket is withheld" -- _body
+assert_contains "retour-client" "the file names the label that withheld it" -- _body
+assert_contains "KOR-238" "the file keeps the identifier" -- _body
+assert_not_contains "Fix the export" "the title is not written" -- _body
+assert_not_contains "Client Dupont" "the description is not written" -- _body
+assert_not_contains "In Progress" "the state is not written" -- _body
+assert_contains "KOR-238 withheld (label retour-client)" "the log says which label withheld it" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-retour-client.json"
+
+it "withholds attente-client whatever its case and surrounding spaces"
+_fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-attente-client.json" >/dev/null 2>&1
+assert_contains "withheld" "the file says the ticket is withheld" -- _body
+assert_contains "attente-client" "the file names the label that withheld it" -- _body
+assert_not_contains "Client Martin" "the description is not written" -- _body
+
+it "still sends a ticket whose labels are read and none is withheld"
+_fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-ok.json" >/dev/null 2>&1
+assert_not_contains "withheld" "a ticket with a neutral label is not withheld" -- _body
+assert_contains "Sign in from a screen" "its title is sent" -- _body
+assert_contains "three states" "its description is sent" -- _body
+
+it "withholds a ticket whose labels cannot be read"
+assert_status 0 "exits 0 when the labels are absent" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-no-labels.json"
+assert_contains "withheld" "a ticket without a labels field is withheld" -- _body
+assert_contains "labels unreadable" "the file says why" -- _body
+assert_not_contains "three states" "the description is not written" -- _body
+
+it "turns the filter off with an empty --withhold-labels"
+_fetch --title "KOR-238 x" --branch main --withhold-labels "" \
+       --response-file "$FIXTURES/linear-retour-client.json" >/dev/null 2>&1
+assert_not_contains "withheld" "a retour-client ticket is sent" -- _body
+assert_contains "Client Dupont" "its description is sent" -- _body
+
+it "withholds exactly the labels --withhold-labels names"
+_fetch --title "KOR-238 x" --branch main --withhold-labels "autre" \
+       --response-file "$FIXTURES/linear-retour-client.json" >/dev/null 2>&1
+assert_contains "Fix the export" "retour-client is sent once the list leaves it out" -- _body
+_fetch --title "KOR-238 x" --branch main --withhold-labels " Bogus , AUTRE " \
+       --response-file "$FIXTURES/linear-ok.json" >/dev/null 2>&1
+assert_contains "withheld" "a ticket labelled autre is withheld" -- _body
+assert_contains "label autre" "the file names the configured label" -- _body
+assert_not_contains "three states" "its description is not written" -- _body
+
+it "withholds a ticket whose labels run past the page read"
+_fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-labels-next-page.json" >/dev/null 2>&1
+assert_contains "labels unreadable" "a second page of labels withholds the ticket" -- _body
+assert_not_contains "three states" "the description is not written" -- _body
+
+it "withholds a ticket whose label list does not say there is no further page"
+_fetch --title "KOR-238 x" --branch main --withhold-labels "autre-x" \
+       --response-file "$FIXTURES/linear-attente-client.json" >/dev/null 2>&1
+assert_contains "labels unreadable" "an absent pageInfo withholds the ticket" -- _body
+assert_not_contains "Client Martin" "the description is not written" -- _body
+
+it "withholds a ticket with a label that has no name"
+_fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-label-no-name.json" >/dev/null 2>&1
+assert_contains "labels unreadable" "a nameless label withholds the ticket" -- _body
+assert_not_contains "three states" "the description is not written" -- _body
+
+it "prints nothing of a withheld ticket to the log"
+assert_not_contains "Client Dupont" "no description on stdout or stderr" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-retour-client.json"
+assert_not_contains "Fix the export" "no title on stdout or stderr" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-retour-client.json"

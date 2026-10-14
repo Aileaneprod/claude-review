@@ -9,7 +9,17 @@
       "name": "In Progress"
      },
      "description": "The screen must distinguish three states: loading, bad credentials, and the server being unreachable.\n\nA user with no membership sees a message saying so.",
-     "url": "https://linear.app/korbyx/issue/KOR-238"
+     "url": "https://linear.app/korbyx/issue/KOR-238",
+     "labels": {
+      "nodes": [
+       {
+        "name": "autre"
+       }
+      ],
+      "pageInfo": {
+       "hasNextPage": false
+      }
+     }
     }
    ]
   }

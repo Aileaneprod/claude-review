@@ -6,6 +6,7 @@
 # Usage:
 #   fetch-ticket.sh --out FILE [--title TITLE] [--branch BRANCH]
 #                   [--response-file FILE] [--max-bytes N]
+#                   [--withhold-labels LIST]
 #
 #   --out FILE            Where to write the ticket. ALWAYS written.
 #   --title TITLE         Pull request title. Searched first for the key.
@@ -14,6 +15,12 @@
 #                         Linear. For the test suite, and for reproducing a
 #                         parse problem offline against a saved response.
 #   --max-bytes N         Cap on the description. Default 24000.
+#   --withhold-labels LIST
+#                         Comma-separated Linear labels whose tickets are never
+#                         sent to the reviewer. Matched case-insensitively,
+#                         spaces around each name ignored. Default
+#                         "retour-client,attente-client". An empty LIST turns
+#                         the filter off.
 #
 # Credential: LINEAR_API_KEY in the environment. Absent is an ordinary outcome,
 # not an error — the file then says there is no ticket, and the review proceeds
@@ -30,6 +37,14 @@
 # is the same reason the pull request title and body are fetched by the reviewer
 # rather than passed in — see docs/ARCHITECTURE.md.
 #
+# WHY SOME TICKETS ARE WITHHELD. The team's data policy: a ticket labelled
+# retour-client or attente-client can quote a real client, and its text does
+# not go to the model provider. Such a ticket still gets a file, but one that
+# carries only its identifier, the fact that it is withheld and the labels that
+# withheld it. It fails closed: a ticket whose labels cannot be read is
+# withheld too. A ticket is sent only once its labels were read and none of
+# them is withheld.
+#
 # Requires: python3.
 
 set -euo pipefail
@@ -39,6 +54,7 @@ pr_title=""
 head_branch=""
 response_file=""
 max_bytes=24000
+withhold_labels="retour-client,attente-client"
 
 die() {
   printf 'fetch-ticket: %s\n' "$1" >&2
@@ -52,7 +68,8 @@ while [ "$#" -gt 0 ]; do
     --branch)        [ "$#" -ge 2 ] || die "--branch requires a value";        head_branch="$2";   shift 2 ;;
     --response-file) [ "$#" -ge 2 ] || die "--response-file requires a value"; response_file="$2"; shift 2 ;;
     --max-bytes)     [ "$#" -ge 2 ] || die "--max-bytes requires a value";     max_bytes="$2";     shift 2 ;;
-    -h|--help)       sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --withhold-labels) [ "$#" -ge 2 ] || die "--withhold-labels requires a value"; withhold_labels="$2"; shift 2 ;;
+    -h|--help)       sed -n '2,48p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -68,6 +85,7 @@ HEAD_BRANCH="$head_branch" \
 OUT_FILE="$out_file" \
 RESPONSE_FILE="$response_file" \
 MAX_BYTES="$max_bytes" \
+WITHHOLD_LABELS="$withhold_labels" \
 python3 <<'PY'
 import json
 import os
@@ -102,6 +120,30 @@ def no_ticket(reason):
     )
     sys.stderr.write("fetch-ticket: %s\n" % reason)
     raise SystemExit(0)
+
+
+def withheld(ident, reason):
+    # Nothing from the ticket goes in here but its identifier: no title, no
+    # state, no description. The reason names the configured label that
+    # matched, not the ticket's own spelling of it.
+    write(
+        "# Linear ticket %s withheld\n\n"
+        "This ticket is withheld by the team's data policy (%s).\n"
+        "Its title, state and description are not part of this review.\n\n"
+        "Review the change on the code, and on the acceptance criteria the pull\n"
+        "request body states. Do not look for the ticket anywhere else. Say in the\n"
+        "summary that ticket %s was withheld.\n" % (ident, reason, ident)
+    )
+    sys.stderr.write("fetch-ticket: %s withheld (%s)\n" % (ident, reason))
+    raise SystemExit(0)
+
+
+# --- which labels withhold a ticket -------------------------------------------
+WITHHOLD = []
+for name in (os.environ.get("WITHHOLD_LABELS") or "").split(","):
+    name = name.strip().lower()
+    if name and name not in WITHHOLD:
+        WITHHOLD.append(name)
 
 
 # --- which ticket -------------------------------------------------------------
@@ -146,7 +188,8 @@ else:
     query = """
     query($team: String!, $number: Float!) {
       issues(filter: {team: {key: {eq: $team}}, number: {eq: $number}}, first: 1) {
-        nodes { identifier title description state { name } url }
+        nodes { identifier title description state { name } url
+                labels(first: 50) { nodes { name } pageInfo { hasNextPage } } }
       }
     }
     """
@@ -179,22 +222,51 @@ except (KeyError, TypeError):
 if not nodes:
     no_ticket("No Linear ticket %s exists, or the credential cannot see it." % identifier)
 
-issue = nodes[0]
-description = issue.get("description") or "_(the ticket has no description)_"
-truncated = False
-if len(description.encode("utf-8")) > max_bytes:
-    description = description.encode("utf-8")[:max_bytes].decode("utf-8", "ignore")
-    truncated = True
+issue = nodes[0] if isinstance(nodes, list) else None
+if not isinstance(issue, dict):
+    no_ticket("Ticket %s could not be read: unexpected response shape." % identifier)
 
-parts = [HEADER % (issue.get("identifier") or identifier)]
-parts.append("**%s**\n\n" % (issue.get("title") or "(untitled)"))
-state = (issue.get("state") or {}).get("name")
-if state:
-    parts.append("State: %s\n\n" % state)
-parts.append("---\n\n")
-parts.append(description.rstrip() + "\n")
-if truncated:
-    parts.append("\n_(description truncated at %d bytes)_\n" % max_bytes)
+# Fails closed: unless every label was read, the ticket does not go out. An
+# empty WITHHOLD list is the filter turned off, and then labels are not read.
+if WITHHOLD:
+    labels = issue.get("labels") if isinstance(issue, dict) else None
+    label_nodes = labels.get("nodes") if isinstance(labels, dict) else None
+    if not isinstance(label_nodes, list) or not all(
+        isinstance(node, dict) and isinstance(node.get("name"), str)
+        for node in label_nodes
+    ):
+        withheld(identifier, "labels unreadable")
+    on_ticket = {node["name"].strip().lower() for node in label_nodes}
+    matched = [name for name in WITHHOLD if name in on_ticket]
+    if matched:
+        withheld(identifier, "%s %s" % ("label" if len(matched) == 1 else "labels",
+                                        ", ".join(matched)))
+    # A withheld label could sit on a page this query did not read: the ticket
+    # goes out only when the response says there is no further page.
+    page = labels.get("pageInfo")
+    if not (isinstance(page, dict) and page.get("hasNextPage") is False):
+        withheld(identifier, "labels unreadable")
+
+# A field of an unexpected type must not crash the step: the file would then
+# not exist. The exception itself is not printed, it could carry ticket text.
+try:
+    description = issue.get("description") or "_(the ticket has no description)_"
+    truncated = False
+    if len(description.encode("utf-8")) > max_bytes:
+        description = description.encode("utf-8")[:max_bytes].decode("utf-8", "ignore")
+        truncated = True
+
+    parts = [HEADER % (issue.get("identifier") or identifier)]
+    parts.append("**%s**\n\n" % (issue.get("title") or "(untitled)"))
+    state = (issue.get("state") or {}).get("name")
+    if state:
+        parts.append("State: %s\n\n" % state)
+    parts.append("---\n\n")
+    parts.append(description.rstrip() + "\n")
+    if truncated:
+        parts.append("\n_(description truncated at %d bytes)_\n" % max_bytes)
+except Exception:
+    no_ticket("Ticket %s could not be read: unexpected response shape." % identifier)
 
 write("".join(parts))
 sys.stderr.write("fetch-ticket: %s -> %d bytes%s\n"
