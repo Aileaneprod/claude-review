@@ -222,7 +222,9 @@ except (KeyError, TypeError):
 if not nodes:
     no_ticket("No Linear ticket %s exists, or the credential cannot see it." % identifier)
 
-issue = nodes[0]
+issue = nodes[0] if isinstance(nodes, list) else None
+if not isinstance(issue, dict):
+    no_ticket("Ticket %s could not be read: unexpected response shape." % identifier)
 
 # Fails closed: unless every label was read, the ticket does not go out. An
 # empty WITHHOLD list is the filter turned off, and then labels are not read.
@@ -234,31 +236,37 @@ if WITHHOLD:
         for node in label_nodes
     ):
         withheld(identifier, "labels unreadable")
-    # A withheld label could sit on a page this query did not read.
-    page = labels.get("pageInfo")
-    if isinstance(page, dict) and page.get("hasNextPage") is True:
-        withheld(identifier, "labels unreadable")
     on_ticket = {node["name"].strip().lower() for node in label_nodes}
     matched = [name for name in WITHHOLD if name in on_ticket]
     if matched:
         withheld(identifier, "%s %s" % ("label" if len(matched) == 1 else "labels",
                                         ", ".join(matched)))
+    # A withheld label could sit on a page this query did not read: the ticket
+    # goes out only when the response says there is no further page.
+    page = labels.get("pageInfo")
+    if not (isinstance(page, dict) and page.get("hasNextPage") is False):
+        withheld(identifier, "labels unreadable")
 
-description = issue.get("description") or "_(the ticket has no description)_"
-truncated = False
-if len(description.encode("utf-8")) > max_bytes:
-    description = description.encode("utf-8")[:max_bytes].decode("utf-8", "ignore")
-    truncated = True
+# A field of an unexpected type must not crash the step: the file would then
+# not exist. The exception itself is not printed, it could carry ticket text.
+try:
+    description = issue.get("description") or "_(the ticket has no description)_"
+    truncated = False
+    if len(description.encode("utf-8")) > max_bytes:
+        description = description.encode("utf-8")[:max_bytes].decode("utf-8", "ignore")
+        truncated = True
 
-parts = [HEADER % (issue.get("identifier") or identifier)]
-parts.append("**%s**\n\n" % (issue.get("title") or "(untitled)"))
-state = (issue.get("state") or {}).get("name")
-if state:
-    parts.append("State: %s\n\n" % state)
-parts.append("---\n\n")
-parts.append(description.rstrip() + "\n")
-if truncated:
-    parts.append("\n_(description truncated at %d bytes)_\n" % max_bytes)
+    parts = [HEADER % (issue.get("identifier") or identifier)]
+    parts.append("**%s**\n\n" % (issue.get("title") or "(untitled)"))
+    state = (issue.get("state") or {}).get("name")
+    if state:
+        parts.append("State: %s\n\n" % state)
+    parts.append("---\n\n")
+    parts.append(description.rstrip() + "\n")
+    if truncated:
+        parts.append("\n_(description truncated at %d bytes)_\n" % max_bytes)
+except Exception:
+    no_ticket("Ticket %s could not be read: unexpected response shape." % identifier)
 
 write("".join(parts))
 sys.stderr.write("fetch-ticket: %s -> %d bytes%s\n"

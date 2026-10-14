@@ -18,7 +18,10 @@
        {
         "name": "retour-client"
        }
-      ]
+      ],
+      "pageInfo": {
+       "hasNextPage": false
+      }
      }
     }
    ]

@@ -15,7 +15,10 @@
        {
         "name": "autre"
        }
-      ]
+      ],
+      "pageInfo": {
+       "hasNextPage": false
+      }
      }
     }
    ]

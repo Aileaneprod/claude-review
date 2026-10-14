@@ -144,3 +144,20 @@ it "withholds a ticket whose labels run past the page read"
 _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-labels-next-page.json" >/dev/null 2>&1
 assert_contains "labels unreadable" "a second page of labels withholds the ticket" -- _body
 assert_not_contains "three states" "the description is not written" -- _body
+
+it "withholds a ticket whose label list does not say there is no further page"
+_fetch --title "KOR-238 x" --branch main --withhold-labels "autre-x" \
+       --response-file "$FIXTURES/linear-attente-client.json" >/dev/null 2>&1
+assert_contains "labels unreadable" "an absent pageInfo withholds the ticket" -- _body
+assert_not_contains "Client Martin" "the description is not written" -- _body
+
+it "withholds a ticket with a label that has no name"
+_fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-label-no-name.json" >/dev/null 2>&1
+assert_contains "labels unreadable" "a nameless label withholds the ticket" -- _body
+assert_not_contains "three states" "the description is not written" -- _body
+
+it "prints nothing of a withheld ticket to the log"
+assert_not_contains "Client Dupont" "no description on stdout or stderr" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-retour-client.json"
+assert_not_contains "Fix the export" "no title on stdout or stderr" -- \
+  _fetch --title "KOR-238 x" --branch main --response-file "$FIXTURES/linear-retour-client.json"
