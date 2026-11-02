@@ -1,0 +1,32 @@
+diff --git a/src/job-log.ts b/src/job-log.ts
+new file mode 100644
+index 0000000..f0bb5b6
+--- /dev/null
++++ b/src/job-log.ts
+@@ -0,0 +1,26 @@
++/**
++ * One line of the agents' job log. The summary page renders `run` as
++ * "see the run that produced this line", so it must point at a workflow run
++ * of this repository, and nothing else.
++ */
++export interface JobLine {
++  run: string;
++  commit: string;
++  outcome: "success" | "failure";
++}
++
++const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_/-]+$/;
++const COMMIT_SHA = /^[0-9a-f]{40}$/;
++
++export function jobLine(input: { run: string; commit: string; outcome: string }): JobLine {
++  if (!RUN_URL.test(input.run)) {
++    throw new TypeError(`run must be a workflow run URL, got ${input.run}`);
++  }
++  if (!COMMIT_SHA.test(input.commit)) {
++    throw new TypeError(`commit must be a full 40-character SHA, got ${input.commit}`);
++  }
++  if (input.outcome !== "success" && input.outcome !== "failure") {
++    throw new TypeError(`outcome must be success or failure, got ${input.outcome}`);
++  }
++  return { run: input.run, commit: input.commit, outcome: input.outcome };
++}

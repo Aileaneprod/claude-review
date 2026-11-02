@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 5,
+  "session_id": "stub-18",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/plans.ts",
+        "line": 16,
+        "severity": "blocking",
+        "title": "rescheduleOccurrence reads the due date before taking the plan lock, so a waiting request uses a stale value",
+        "evidence": "const before = await tx.one<{ plan_id: string; due_on: string }>(",
+        "why_it_matters": "Under READ COMMITTED a second request blocked on FOR UPDATE still holds the due date it read before waiting. After a move from A to B, a request for B is not refused and logs a second due_reported; a request for A is refused although the date is now B.",
+        "suggested_fix": "Re-read the occurrence after the lock is held, as cancelOccurrence does, and use that value for the guard and the event."
+      }
+    ]
+  }
+}
