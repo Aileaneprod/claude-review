@@ -159,7 +159,9 @@ below were missed with the code on screen; you have to do them, not notice them.
   an event, a write. Under PostgreSQL's default READ COMMITTED, a concurrent
   writer can change it while this request waits for the lock. A lock taken
   after the read protects nothing the read decided; re-reading after the lock
-  is the fix.
+  is the fix. It is a finding only when the value can actually change and that
+  lock is what serialises its writers — check both in the code before raising
+  it. An immutable column, or a value guarded by another lock, is not one.
 - **A check proves only what it tests.** For each validation the change adds or
   relies on, name what the value must BE — a run of this repository, a date
   that exists, a status that is present — then try a value with the right shape
