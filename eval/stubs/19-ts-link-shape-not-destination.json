@@ -8,7 +8,7 @@
     "findings": [
       {
         "path": "src/job-log.ts",
-        "line": 13,
+        "line": 12,
         "severity": "blocking",
         "title": "RUN_URL accepts any github.com path, so an issue or pull request link passes as the run",
         "evidence": "const RUN_URL = /^https:\\/\\/github\\.com\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+\\/[A-Za-z0-9_/-]+$/;",

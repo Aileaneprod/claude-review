@@ -25,12 +25,12 @@
       "id": "decoy-cancel-reads-after-lock",
       "path": "src/plans.ts",
       "any_of": [
-        "in cancelOccurrence",
-        "cancelOccurrence reads",
         "cancelOccurrence is racy",
         "cancelOccurrence has a race",
-        "cancelOccurrence is not",
-        "cancel also"
+        "cancelOccurrence reads before",
+        "race in cancelOccurrence",
+        "cancelOccurrence uses a stale",
+        "cancelOccurrence must re-read"
       ],
       "why": "cancelOccurrence takes the plan lock and only then reads the occurrence, so it sees a concurrent reschedule. Flagging it means the reviewer matched on the lock pattern without checking the order of statements. Every keyword asserts something about cancelOccurrence; the diff only writes `cancelOccurrence(`."
     }

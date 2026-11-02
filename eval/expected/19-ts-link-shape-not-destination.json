@@ -8,7 +8,10 @@
       "path": "src/job-log.ts",
       "min_severity": "important",
       "any_of": [
-        "issue",
+        "/issues/",
+        "issue url",
+        "issue link",
+        "an issue",
         "pull request",
         "/pull/",
         "actions/runs",

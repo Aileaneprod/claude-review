@@ -8,10 +8,8 @@
       "path": "src/units.ts",
       "min_severity": "important",
       "any_of": [
-        "statuspresent",
         "null status",
         "status is null",
-        "status: null",
         "without a status",
         "missing status",
         "lacks a status",
