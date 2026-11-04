@@ -159,6 +159,24 @@ assert_contains "issues/comments/31 --method PATCH" "the first notice was collap
 assert_contains "issues/comments/32 --method PATCH" "the second notice was collapsed" -- _calls
 assert_not_contains "--method POST" "collapsing posts nothing" -- _calls
 
+# A PATCH that fails leaves that notice live. Saying `collapsed` would report
+# a retraction that never happened (Copilot, 2026-11-04, on #40).
+it "keeps failed when a notice could not be collapsed, and still exits 0"
+_setup legacy-pile
+gh() {
+  echo "$*" >> "$GH_LOG"
+  case "$*" in
+    *comments/32*--method*) return 1 ;;
+    *--method*) echo '{}' ;;
+    *) cat "$GH_LOOKUP" ;;
+  esac
+}
+export -f gh
+_collapse >/dev/null 2>&1
+assert_equal "0" "$?" "a notice is a diagnostic: the job does not fail"
+assert_equal "failed" "$(_state)" "the witness does not claim a retraction"
+assert_contains "issues/comments/31 --method PATCH" "the other notice was still collapsed" -- _calls
+
 # --- notices posted before this script existed are adopted ------------------
 #
 # They carry no marker, so only their text can find them. Without this the

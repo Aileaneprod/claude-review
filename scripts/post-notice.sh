@@ -289,16 +289,23 @@ fi
 
 # Collapse first. If the create below fails, the thread is left with collapsed
 # stubs and no alarm, which is quieter than two live notices.
+collapse_failed=0
 for stale_id in $collapse_ids; do
-  gh api "repos/${repo}/issues/comments/${stale_id}" \
-    --method PATCH --input "${work_dir}/collapsed.json" >/dev/null 2>&1 \
-    && printf 'post-notice: collapsed notice %s\n' "$stale_id" >&2 \
-    || printf 'post-notice: warning: could not collapse notice %s\n' "$stale_id" >&2
+  if gh api "repos/${repo}/issues/comments/${stale_id}" \
+       --method PATCH --input "${work_dir}/collapsed.json" >/dev/null 2>&1; then
+    printf 'post-notice: collapsed notice %s\n' "$stale_id" >&2
+  else
+    collapse_failed=$((collapse_failed + 1))
+    printf 'post-notice: warning: could not collapse notice %s\n' "$stale_id" >&2
+  fi
 done
 
 case "$action" in
   collapse)
-    record_state "$(state_for collapse)"
+    # A notice that could not be rewritten is still live on the pull request:
+    # `collapsed` would claim a retraction that did not happen. The witness
+    # keeps the `failed` written at the start, and the job still exits 0.
+    [ "$collapse_failed" -eq 0 ] && record_state "$(state_for collapse)"
     ;;
   patch)
     comment_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${work_dir}/plan.json")"
