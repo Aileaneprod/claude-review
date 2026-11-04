@@ -96,7 +96,44 @@ trap 'rm -rf "$work_dir"' EXIT
 # the wrapper tells them apart.
 if ! gh api "repos/${repo}/contents/${workflow}" -H "Accept: application/vnd.github.raw" \
      > "${work_dir}/wrapper.yml" 2>"${work_dir}/wrapper.err"; then
-  die "no wrapper at ${workflow} on ${repo} — is this repository wired to claude-review? ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))"
+  # A CREDENTIAL failure and a MISSING WRAPPER arrive at the same line, and
+  # until this branch they left with the same sentence. That sentence asks "is
+  # this repository wired to claude-review?", which is the wrong hypothesis for
+  # the likelier cause and sends the reader to check a file that is fine.
+  #
+  # The likelier cause, because of how the guard above it works: catch-up.yml
+  # tests `[ -z "$REREVIEW_GITHUB_TOKEN" ]`, so it catches a token that is
+  # UNSET. An EXPIRED one is still set, the sweep runs, and every call fails
+  # here — and fine-grained tokens expire within a year, so this is the
+  # ordinary end of every credential this workflow is given. docs/SETUP.md
+  # promised that "the daily run starts failing and its job summary names the
+  # secret to replace"; this is the line that has to make that true, raised by
+  # our own reviewer on pull request #18.
+  #
+  # The rate-limit arm comes FIRST, because `case` takes the first match and
+  # GitHub answers an exhausted rate limit with a 403 too: `gh: API rate limit
+  # exceeded … (HTTP 403)` would otherwise tell the reader to replace a secret
+  # that is fine, when the remedy is to wait. Raised by both other reviewers
+  # on #18.
+  #
+  # The credential arm names the secret only as the SCHEDULED case. This script
+  # is also run by hand (docs/SETUP.md), and there `gh` authenticates with
+  # whatever `gh auth status` shows, so "replace REREVIEW_GITHUB_TOKEN" alone
+  # would send a person at a terminal to fix a secret their run never used.
+  # The secret's name stays in the sentence because the scheduled summary is
+  # the promise docs/SETUP.md makes. Raised by CodeRabbit on #18.
+  case "$(head -1 "${work_dir}/wrapper.err" 2>/dev/null)" in
+    *[Rr]ate\ limit*)
+      die "could not read ${workflow} on ${repo}: GitHub's API rate limit is exhausted for the credential this run uses. Nothing is wrong with the credential or with ${repo}; wait for the limit to reset and run again. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
+    *401*|*403*|*[Bb]ad\ credentials*|*"Resource not accessible"*)
+      die "could not read ${workflow} on ${repo}: GitHub refused the credential \`gh\` is using: it is expired, revoked, or not authorised for ${repo}. In the scheduled catch-up that credential is the \`REREVIEW_GITHUB_TOKEN\` secret — a fine-grained token expires within a year, and an expired one is still SET, so the credential guard upstream does not catch it; replace that secret. Run by hand, it is whatever \`gh auth status\` shows. Nothing in ${repo} needs changing. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
+  esac
+  # A 404 carries TWO hypotheses, not one. GitHub answers 404, not 403, for a
+  # private repository the credential cannot see, so a fine-grained
+  # REREVIEW_GITHUB_TOKEN whose repository list leaves ${repo} out arrives here
+  # looking exactly like a missing wrapper. Naming only the wrapper sent the
+  # reader to check a file that may be fine. Raised by CodeRabbit on #18.
+  die "no wrapper at ${workflow} on ${repo}, or the credential \`gh\` is using cannot read ${repo} — GitHub answers 404 for a private repository a token cannot see. Is this repository wired to claude-review, and is it in the repository list of that credential (in the scheduled catch-up, the \`REREVIEW_GITHUB_TOKEN\` secret)? ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))"
 fi
 # Anchored, and a `#` before it disqualifies the line. `grep 'checks: *write'`
 # was satisfied by a wrapper that merely MENTIONS the permission — a commented
@@ -158,11 +195,23 @@ encoded_check="$(python3 -c \
 targets=""
 unreviewed=0
 unknown=0
+# Replays this run asked for and did not get. Counted apart from `unknown`,
+# which is about pull requests it could not INSPECT: a refused replay was
+# inspected correctly and then not carried out.
+refused=0
 
 # One exit, so that no branch of this can forget what an uninspected pull
 # request does to the answer. A caller that reads no output at all — a
 # scheduled one — has only the status to go on.
-finish() { [ "$unknown" -eq 0 ] || exit 1; exit 0; }
+#
+# `refused` joins it for the same reason. A run where every read succeeded and
+# every `gh run rerun` was turned down left `unknown` at zero and exited 0, so
+# a scheduled parent recorded the repository as clean while nothing had been
+# replayed. Measured: two refusals printed "replayed 0 of 2." and exited 0.
+# This script's own header promises exit 1 when a repository "did not come
+# back clean", and one whose replays were all refused did not. Raised by a
+# cross-model audit on 2026-11-04.
+finish() { { [ "$unknown" -eq 0 ] && [ "$refused" -eq 0 ]; } || exit 1; exit 0; }
 
 while IFS="	" read -r number sha ref; do
   [ -n "$number" ] || continue
@@ -320,6 +369,7 @@ while read -r number run_id; do
     replayed=$((replayed + 1))
     printf '  replayed PR %s (run %s)\n' "$number" "$run_id"
   else
+    refused=$((refused + 1))
     printf '  PR %s (run %s) refused the replay: %s\n' \
       "$number" "$run_id" "$(head -1 "${work_dir}/rerun.err" 2>/dev/null)" >&2
   fi

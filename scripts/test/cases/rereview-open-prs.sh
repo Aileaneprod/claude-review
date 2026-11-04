@@ -67,6 +67,14 @@ _setup() {
     local sha
     case "$*" in
       *contents/*)
+        # GH_WRAPPER_ERR lets a case make the wrapper read fail with the exact
+        # stderr the API produces, which is the only thing telling a refused
+        # credential from a missing file.
+        if [ -n "${GH_WRAPPER_ERR:-}" ]; then
+          printf '%s
+' "$GH_WRAPPER_ERR" >&2
+          return 1
+        fi
         cat "$GH_FIX/wrapper.yml" ;;
       *pulls\?state=open*)
         cat "$GH_FIX/pulls.json" ;;
@@ -81,6 +89,14 @@ _setup() {
         [ "${GH_BREAK:-}" = "refuse-runs-$sha" ] && return 1
         cat "$GH_FIX/runs-${sha}.json" ;;
       *"run rerun"*)
+        # GH_RERUN_FAIL turns every replay down the way GitHub does when the
+        # run is too old to re-run, or the token lacks `actions: write`. It is
+        # the only way to reach the path where every read succeeded and nothing
+        # was replayed.
+        if [ -n "${GH_RERUN_FAIL:-}" ]; then
+          echo 'gh: Unable to retry this run (HTTP 403)' >&2
+          return 1
+        fi
         return 0 ;;
       *)
         echo '{}' ;;
@@ -223,3 +239,82 @@ it "percent-encodes the whole check name, not only its spaces"
 _setup
 _report --check 'weird & name?' >/dev/null
 assert_contains "weird%20%26%20name%3F" "encodes & and ? too" -- _log
+
+# --- a refused credential is not a missing wrapper ----------------------------
+#
+# Both arrive at the same `gh api .../contents/...` failure, and until this
+# branch both left with "is this repository wired to claude-review?" — the
+# wrong hypothesis for the likelier cause, sending the reader to check a file
+# that is fine.
+#
+# Likelier because of how the guard upstream works: catch-up.yml tests
+# `[ -z "$REREVIEW_GITHUB_TOKEN" ]`, which catches a token that is UNSET. An
+# EXPIRED one is still set, so the sweep runs and every call fails here — and
+# a fine-grained token expires within a year, so this is the ordinary end of
+# every credential this workflow is given. docs/SETUP.md promised the run
+# would name the secret to replace; raised by our own reviewer on #18.
+
+it "names the secret when GitHub refuses the credential"
+_setup
+GH_WRAPPER_ERR='gh: Bad credentials (HTTP 401)' _report >"$TESTTMP/rop-401" 2>&1 || true
+assert_contains "REREVIEW_GITHUB_TOKEN" \
+  "the message names the secret to replace" -- cat "$TESTTMP/rop-401"
+assert_contains "expired, revoked, or not authorised" \
+  "and says what is wrong with it" -- cat "$TESTTMP/rop-401"
+assert_not_contains "wired to claude-review" \
+  "and does not send the reader to check a wrapper that is fine" -- cat "$TESTTMP/rop-401"
+# Run by hand, `gh` is not using that secret at all, so the message has to say
+# where the credential comes from then too. Raised by CodeRabbit on #18.
+assert_contains "gh auth status" \
+  "and tells a person at a terminal which credential was refused" -- cat "$TESTTMP/rop-401"
+
+# A 403 is not always the credential: GitHub answers an exhausted rate limit
+# with a 403 too, and telling the reader to replace a secret that works sends
+# them the wrong way. Raised by both other reviewers on #18.
+it "says wait, not replace the secret, when the rate limit is exhausted"
+_setup
+GH_WRAPPER_ERR='gh: API rate limit exceeded for user ID 1. (HTTP 403)' _report >"$TESTTMP/rop-rate" 2>&1 || true
+assert_contains "wait for the limit to reset" \
+  "the message gives the remedy that fits" -- cat "$TESTTMP/rop-rate"
+assert_not_contains "expired, revoked" \
+  "and does not call a working credential expired" -- cat "$TESTTMP/rop-rate"
+
+# A 404 is EITHER a missing wrapper or a private repository the credential
+# cannot see — GitHub answers 404 for the second as well. This case used to
+# assert the secret was NOT named on a 404, which recorded the defect rather
+# than guarding against it. Raised by CodeRabbit on #18.
+it "names both causes a 404 can have"
+_setup
+GH_WRAPPER_ERR='gh: Not Found (HTTP 404)' _report >"$TESTTMP/rop-404" 2>&1 || true
+assert_contains "wired to claude-review" \
+  "a 404 keeps the missing-wrapper hypothesis" -- cat "$TESTTMP/rop-404"
+assert_contains "cannot read o/r" \
+  "and names the credential that cannot see the repository" -- cat "$TESTTMP/rop-404"
+assert_not_contains "expired, revoked" \
+  "without calling the credential expired, which a 404 does not show" -- cat "$TESTTMP/rop-404"
+
+# --- replays that were all refused are not a clean pass -----------------------
+#
+# Raised by a cross-model audit on 2026-11-04. Every read succeeding and every
+# `gh run rerun` being turned down left `unknown` at zero, so this script
+# printed "replayed 0 of N." and exited 0 — and the scheduled parent recorded
+# the repository as clean while nothing had been replayed. The premise of this
+# tool is that nobody is watching, so the status is the only channel that
+# reaches a person.
+
+it "exits non-zero when every replay was refused"
+_setup
+assert_status 1 "a repository whose replays were all refused did not come back clean" \
+  -- env GH_RERUN_FAIL=1 "$SCRIPTS/rereview-open-prs.sh" --repo o/r --rerun --limit 2
+
+it "names each refusal so the reason reaches the log"
+_setup
+GH_RERUN_FAIL=1 "$SCRIPTS/rereview-open-prs.sh" --repo o/r --rerun --limit 2 \
+  >"$TESTTMP/rop-refused" 2>&1 || true
+assert_contains "refused the replay" "the refusal is printed, not swallowed" \
+  -- cat "$TESTTMP/rop-refused"
+
+it "still exits zero when the replays went through"
+_setup
+assert_status 0 "a clean replay keeps the clean status" \
+  -- "$SCRIPTS/rereview-open-prs.sh" --repo o/r --rerun --limit 2
