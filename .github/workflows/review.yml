@@ -1049,6 +1049,15 @@ jobs:
               --title "AI review completed" \
               --summary "An earlier attempt on this commit could not review it. This one did, and its summary is on the pull request." \
               --only-if-exists || true
+
+            # And retract the notice, for the same reason. The summary above
+            # was PATCHed into a sticky that may be days old, so it does not
+            # move to the end of the thread — leaving "this push was not
+            # reviewed" as the last thing a reader sees on a pull request that
+            # has just been reviewed. Collapsing is not deleting: it rewrites
+            # only comments we authored, to one line.
+            .claude-review-tooling/scripts/post-notice.sh \
+              --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --collapse || true
           fi
 
       # One question, asked of the only step that can answer it: did a summary
@@ -1216,7 +1225,19 @@ jobs:
             echo "review the changes yourself, and check the workflow logs if this repeats."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::warning title=${headline}::No review summary was posted; merge is not blocked"
-          gh pr comment "$PR_NUMBER" --body "$body" \
+
+          # One live notice per pull request, keyed on the push it is about.
+          # This was a bare `gh pr comment` until 2026-11-04, which meant one
+          # comment per unreviewed push and nothing to take them back: five
+          # stacked on Aileaneprod/korbyx#746, and on #735, #626, #665 and
+          # #677 a real review landed into a sticky created days earlier while
+          # the last visible comment still said the push was not reviewed. A
+          # handover read those four and concluded four reviews were missing;
+          # all four had been delivered. See scripts/post-notice.sh.
+          printf '%s\n' "$body" >"$RUNNER_TEMP/notice.md"
+          .claude-review-tooling/scripts/post-notice.sh \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --sha "$HEAD_SHA" \
+            --body-file "$RUNNER_TEMP/notice.md" \
             || echo "Could not post the notice comment; the job summary above records it."
 
           # The three lines above were ALL already there while
