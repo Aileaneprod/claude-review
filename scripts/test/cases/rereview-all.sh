@@ -105,6 +105,15 @@ _ra_setup() {
           echo 'gh: Unable to retry this run (HTTP 403)' >&2
           return 1
         fi
+        # GH_RA_RERUN_KILL=N kills the child on the Nth replay of the whole
+        # pass, AFTER it was logged — i.e. after GitHub accepted it and before
+        # the child could print its per-replay line. A function call runs in
+        # the child's own process, so `$$` is the child, and this is the one
+        # way this harness has to interrupt it mid-loop.
+        if [ -n "${GH_RA_RERUN_KILL:-}" ] && \
+           [ "$(grep -c 'run rerun' "$GH_LOG")" -eq "$GH_RA_RERUN_KILL" ]; then
+          kill -KILL $$
+        fi
         return 0 ;;
       *)
         echo '{}' ;;
@@ -227,12 +236,13 @@ assert_status 1 "a refused credential fails the scheduled run" \
 
 # --- the budget is the one mistake here with no undo --------------------------
 #
-# Raised by a cross-model audit on 2026-11-04. The spend per repository is read
+# Raised by a cross-model audit on 2026-11-04. The spend per repository was read
 # from the child's final tally line, and `got` empty meant `got=0`. An entry
 # KILLED after replaying one of two therefore reported nothing spent, and the
 # next repository received the full budget again: with a budget of 2, three
-# replays could be engaged. Over-spending is the direction with no undo, so an
-# unknown is now charged at the whole allowance that entry was given.
+# replays could be engaged. The spend is now counted from the per-replay lines,
+# and a child killed by a signal — which may have had a replay accepted and not
+# yet printed — is charged the whole allowance it was given (Copilot, #18).
 
 it "refuses a leading zero, which bash reads as octal"
 _ra_setup
@@ -264,11 +274,13 @@ printf 'o/r\no/s\n' > "$TESTTMP/ra-repos.txt"
 printf 'permissions:\n  checks: write\n' > "$GH_FIX/wrapper-o-r.yml"
 printf 'permissions:\n  checks: write\n' > "$GH_FIX/wrapper-o-s.yml"
 _ra --rerun --budget 2 >"$TESTTMP/ra-budget" 2>&1 || true
-assert_contains "run rerun" "the first repository replayed something" -- cat "$GH_LOG"
-# The second invocation of the child must carry a smaller --limit than the
-# first, because the first one's replays were charged.
-assert_not_contains "--limit 2 --limit 2" \
-  "the second repository is not handed the whole budget again" -- cat "$TESTTMP/ra-budget"
+# Counted from the stub's log, not from the report. The assertion this replaces
+# looked for "--limit 2 --limit 2" in the report, which never prints the
+# child's arguments, so it passed whatever the budget did.
+assert_equal "2" "$(_ra_reruns)" \
+  "the first repository's two replays use the whole budget, and no more go out"
+assert_contains "Not reached" \
+  "so the second repository is not handed the budget again" -- cat "$TESTTMP/ra-budget"
 
 # And a per-replay line is the unit, so a REFUSED replay is not charged: the
 # budget pays for work done, not for attempts.
@@ -280,35 +292,26 @@ GH_RA_RERUN_FAIL=1 _ra --rerun --budget 2 >"$TESTTMP/ra-refused" 2>&1 || true
 assert_contains "Replayed **0** review(s)" \
   "nothing replayed means nothing spent" -- cat "$TESTTMP/ra-refused"
 
-# The defect needed an INTERRUPTED child, which this harness cannot produce: a
-# `die` in the child happens before the replay loop, and inside it a failure is
-# handled rather than fatal. So the mechanism is tested on the artefact instead
-# — the captured output of a child that replayed once and never reached its
-# closing tally, which is exactly what a killed one leaves behind.
-it "counts a replay the child never got to tally"
-cut="$TESTTMP/ra-cut-output.txt"
-{
-  printf 'rereview-open-prs: 2 unreviewed pull request(s) on o/r\n'
-  printf '  replayed PR 228 (run 111)\n'
-} > "$cut"
-# The fix: per-replay lines, printed as each one succeeds.
-assert_equal "1" "$(grep -c '^  replayed PR ' "$cut")" \
-  "the replay that happened is counted without the tally line"
-# The defect: the closing tally, which a killed child never prints. Empty, and
-# `case '' in *[!0-9]*` does not match, so it became 0 and the next repository
-# was handed the whole budget again.
-assert_equal "" \
-  "$(sed -n 's/^rereview-open-prs: replayed \([0-9][0-9]*\) of .*/\1/p' "$cut" | tail -1)" \
-  "while the tally line it replaced is absent, which is how 0 was charged"
-
-# And the two agree on a child that finished, so the change is not a behaviour
-# change on the ordinary path.
-it "agrees with the tally when the child did finish"
-done_out="$TESTTMP/ra-done-output.txt"
-{
-  printf '  replayed PR 228 (run 111)\n'
-  printf '  replayed PR 231 (run 444)\n'
-  printf 'rereview-open-prs: replayed 2 of 2.\n'
-} > "$done_out"
-assert_equal "2" "$(grep -c '^  replayed PR ' "$done_out")" \
-  "both readings give the same count on a clean pass"
+# An INTERRUPTED child, end to end. The two cases that stood here grepped text
+# the test itself had written and never ran rereview-all.sh, so they passed
+# whatever the coordinator did (Copilot, #18). The `gh` stub now kills the child
+# on the second replay of the pass, right after logging it: GitHub has accepted
+# it and the child dies before printing its line, which is the window Copilot
+# named. o/r is given 2 of a budget of 3, replays one, and dies on the second.
+# Read from the tally that made 0; read from the per-replay lines that makes 1;
+# either way o/s is handed 2 and four replays go out on a budget of 3. Charging
+# a killed child its whole allowance leaves o/s exactly 1.
+it "never lets an interrupted repository push the pass past its budget"
+_ra_setup
+printf 'o/r\no/s\n' > "$TESTTMP/ra-repos.txt"
+printf 'permissions:\n  checks: write\n' > "$GH_FIX/wrapper-o-r.yml"
+printf 'permissions:\n  checks: write\n' > "$GH_FIX/wrapper-o-s.yml"
+GH_RA_RERUN_KILL=2 _ra --rerun --budget 3 --limit 2 >"$TESTTMP/ra-killed" 2>&1 || true
+assert_equal "3" "$(_ra_reruns)" \
+  "the replays GitHub accepted, counted or not, stay within the budget"
+assert_contains "Replayed **2** review(s)" \
+  "the report counts only the replays it can confirm" -- cat "$TESTTMP/ra-killed"
+assert_contains "Up to 1 more replay(s) are uncertain" \
+  "and states the uncertain one apart from them" -- cat "$TESTTMP/ra-killed"
+assert_contains "Killed before it finished" \
+  "in the header and in the block of the repository it happened to" -- cat "$TESTTMP/ra-killed"

@@ -210,7 +210,12 @@ blind="${work_dir}/blind.md"
 : > "$body"
 : > "$blind"
 
+# `spent` is what the budget is charged; `replayed` is what is KNOWN to have
+# happened, and `uncertain` the difference — allowance reserved for a child
+# that was killed before it could say what it did. The report keeps them apart.
 spent=0
+replayed=0
+uncertain=0
 remaining="$budget"
 failed=0
 skipped=0
@@ -285,7 +290,25 @@ while read -r repo workflow; do
     # rest of the list. Counting what actually happened needs no such trade.
     got="$(grep -c '^  replayed PR ' "$out" 2>/dev/null || true)"
     case "${got:-}" in ''|*[!0-9]*) got=0 ;; esac
-    spent=$((spent + got))
+
+    # Except when the child was KILLED. GitHub accepts a replay before the
+    # child prints its line, so a child killed in between leaves a replay that
+    # happened and was never counted — and the next repository is handed that
+    # allowance again. A status above 128 is a death by signal, not one of the
+    # child's own exits (it only ever exits 0 or 1), so there, and only there,
+    # the whole allowance it was given is charged. That is narrower than the
+    # "any unclean exit" rule rejected above: a child that exits 1 after a
+    # refusal or a failed read did print every replay it made. Raised by
+    # Copilot on #18. The case that pins it kills the child through the `gh`
+    # stub, right after a replay is accepted; without this branch, four
+    # replays went out on a budget of 3.
+    charged="$got"
+    if [ "$status" -gt 128 ] && [ "$effective" -gt "$got" ]; then
+      charged="$effective"
+    fi
+    replayed=$((replayed + got))
+    uncertain=$((uncertain + charged - got))
+    spent=$((spent + charged))
     remaining=$((budget - spent))
     [ "$remaining" -ge 0 ] || remaining=0
   fi
@@ -293,6 +316,10 @@ while read -r repo workflow; do
   {
     printf '#### %s\n\n' "$repo"
     [ "$status" -eq 0 ] || printf 'Did not come back clean (exit %s) — the output below says whether it was out of reach or checked with something left uninspected.\n\n' "$status"
+    if [ "$rerun" -eq 1 ] && [ "$charged" -gt "$got" ]; then
+      printf 'Killed before it finished: %s replay(s) confirmed, up to %s more may have been engaged without being reported. The whole allowance of %s is charged against the budget.\n\n' \
+        "$got" "$((charged - got))" "$charged"
+    fi
     printf '```\n'
     cat "$out"
     printf '```\n\n'
@@ -309,7 +336,11 @@ EOF
 printf '### Review catch-up\n\n'
 if [ "$rerun" -eq 1 ]; then
   printf 'Replayed **%s** review(s) of a **%s** budget, across %s %s.\n\n' \
-    "$spent" "$budget" "$count" "$(plural "$count" repository repositories)"
+    "$replayed" "$budget" "$count" "$(plural "$count" repository repositories)"
+  if [ "$uncertain" -gt 0 ]; then
+    printf '**Up to %s more replay(s) are uncertain**: a check was killed before it could report what it had replayed, so its whole allowance was charged against the budget. Look at the Actions tab of the repository whose block says so.\n\n' \
+      "$uncertain"
+  fi
 else
   printf 'Report only — nothing was replayed. Read %s %s.\n\n' \
     "$count" "$(plural "$count" repository repositories)"
