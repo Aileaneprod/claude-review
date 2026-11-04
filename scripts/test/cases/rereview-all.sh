@@ -81,6 +81,13 @@ _ra_setup() {
     case "$*" in
       *contents/*)
         slug="$(printf '%s' "$*" | sed -n 's|.*repos/\([^/]*\)/\([^/]*\)/contents/.*|\1-\2|p')"
+        # GH_RA_WRAPPER_ERR makes the read fail with the API's own stderr,
+        # which is the only thing that tells a refused credential from a
+        # missing file.
+        if [ -n "${GH_RA_WRAPPER_ERR:-}" ]; then
+          printf '%s\n' "$GH_RA_WRAPPER_ERR" >&2
+          return 1
+        fi
         [ -f "$GH_FIX/wrapper-${slug}.yml" ] || return 1
         cat "$GH_FIX/wrapper-${slug}.yml" ;;
       *pulls\?state=open*)
@@ -179,3 +186,35 @@ _ra_wrapper o/one
 printf 'o/one .github/workflows/ai-review.yml and-then-some\n' > "$TESTTMP/ra-repos.txt"
 assert_status 1 "a third field is not quietly ignored" -- _ra --budget 5
 assert_equal "" "$(_ra_log)" "and the roster is read before anything is called"
+
+# --- the promise docs/SETUP.md makes, end to end ------------------------------
+#
+# docs/SETUP.md says a fine-grained token's expiry makes "the daily run start
+# failing and its job summary name the secret to replace". Nothing made that
+# true: the guard in catch-up.yml tests `[ -z "$REREVIEW_GITHUB_TOKEN" ]`, which
+# catches an UNSET token, while an EXPIRED one is still set — so the sweep ran
+# and died on "is this repository wired to claude-review?", the wrong
+# hypothesis. Raised by our own reviewer on #18.
+#
+# The chain this asserts, because each link was read and none was measured:
+# rereview-open-prs.sh writes the cause to stderr, rereview-all.sh captures it
+# with `2>&1` into that repository's block, and catch-up.yml tees the report
+# into GITHUB_STEP_SUMMARY.
+
+it "names the secret in the report when the credential is refused"
+_ra_setup
+printf 'o/r\n' > "$TESTTMP/ra-repos.txt"
+GH_RA_WRAPPER_ERR='gh: Bad credentials (HTTP 401)' _ra > "$TESTTMP/ra-401" 2>&1 || true
+assert_contains "REREVIEW_GITHUB_TOKEN" \
+  "the report names the secret to replace" -- cat "$TESTTMP/ra-401"
+assert_contains "Did not come back clean" \
+  "and the repository's block says it failed" -- cat "$TESTTMP/ra-401"
+assert_not_contains "wired to claude-review" \
+  "without blaming a wrapper that is fine" -- cat "$TESTTMP/ra-401"
+
+it "exits non-zero so an unattended run reaches a person"
+_ra_setup
+printf 'o/r\n' > "$TESTTMP/ra-repos.txt"
+assert_status 1 "a refused credential fails the scheduled run" \
+  -- env GH_RA_WRAPPER_ERR='gh: Bad credentials (HTTP 401)' "$SCRIPTS/rereview-all.sh" \
+       --repos "$TESTTMP/ra-repos.txt"

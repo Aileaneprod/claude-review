@@ -96,6 +96,23 @@ trap 'rm -rf "$work_dir"' EXIT
 # the wrapper tells them apart.
 if ! gh api "repos/${repo}/contents/${workflow}" -H "Accept: application/vnd.github.raw" \
      > "${work_dir}/wrapper.yml" 2>"${work_dir}/wrapper.err"; then
+  # A CREDENTIAL failure and a MISSING WRAPPER arrive at the same line, and
+  # until this branch they left with the same sentence. That sentence asks "is
+  # this repository wired to claude-review?", which is the wrong hypothesis for
+  # the likelier cause and sends the reader to check a file that is fine.
+  #
+  # The likelier cause, because of how the guard above it works: catch-up.yml
+  # tests `[ -z "$REREVIEW_GITHUB_TOKEN" ]`, so it catches a token that is
+  # UNSET. An EXPIRED one is still set, the sweep runs, and every call fails
+  # here — and fine-grained tokens expire within a year, so this is the
+  # ordinary end of every credential this workflow is given. docs/SETUP.md
+  # promised that "the daily run starts failing and its job summary names the
+  # secret to replace"; this is the line that has to make that true, raised by
+  # our own reviewer on pull request #18.
+  case "$(head -1 "${work_dir}/wrapper.err" 2>/dev/null)" in
+    *401*|*403*|*[Bb]ad\ credentials*|*"Resource not accessible"*)
+      die "could not read ${workflow} on ${repo}: GitHub refused the credential. The \`REREVIEW_GITHUB_TOKEN\` secret this run authenticates with is expired, revoked, or not authorised for ${repo} — a fine-grained token expires within a year, and an expired one is still SET, so the credential guard upstream does not catch it. Replace that secret; nothing in ${repo} needs changing. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
+  esac
   die "no wrapper at ${workflow} on ${repo} — is this repository wired to claude-review? ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))"
 fi
 # Anchored, and a `#` before it disqualifies the line. `grep 'checks: *write'`

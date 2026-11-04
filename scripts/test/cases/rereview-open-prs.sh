@@ -67,6 +67,14 @@ _setup() {
     local sha
     case "$*" in
       *contents/*)
+        # GH_WRAPPER_ERR lets a case make the wrapper read fail with the exact
+        # stderr the API produces, which is the only thing telling a refused
+        # credential from a missing file.
+        if [ -n "${GH_WRAPPER_ERR:-}" ]; then
+          printf '%s
+' "$GH_WRAPPER_ERR" >&2
+          return 1
+        fi
         cat "$GH_FIX/wrapper.yml" ;;
       *pulls\?state=open*)
         cat "$GH_FIX/pulls.json" ;;
@@ -223,3 +231,35 @@ it "percent-encodes the whole check name, not only its spaces"
 _setup
 _report --check 'weird & name?' >/dev/null
 assert_contains "weird%20%26%20name%3F" "encodes & and ? too" -- _log
+
+# --- a refused credential is not a missing wrapper ----------------------------
+#
+# Both arrive at the same `gh api .../contents/...` failure, and until this
+# branch both left with "is this repository wired to claude-review?" — the
+# wrong hypothesis for the likelier cause, sending the reader to check a file
+# that is fine.
+#
+# Likelier because of how the guard upstream works: catch-up.yml tests
+# `[ -z "$REREVIEW_GITHUB_TOKEN" ]`, which catches a token that is UNSET. An
+# EXPIRED one is still set, so the sweep runs and every call fails here — and
+# a fine-grained token expires within a year, so this is the ordinary end of
+# every credential this workflow is given. docs/SETUP.md promised the run
+# would name the secret to replace; raised by our own reviewer on #18.
+
+it "names the secret when GitHub refuses the credential"
+_setup
+GH_WRAPPER_ERR='gh: Bad credentials (HTTP 401)' _report >"$TESTTMP/rop-401" 2>&1 || true
+assert_contains "REREVIEW_GITHUB_TOKEN" \
+  "the message names the secret to replace" -- cat "$TESTTMP/rop-401"
+assert_contains "expired, revoked, or not authorised" \
+  "and says what is wrong with it" -- cat "$TESTTMP/rop-401"
+assert_not_contains "wired to claude-review" \
+  "and does not send the reader to check a wrapper that is fine" -- cat "$TESTTMP/rop-401"
+
+it "still says missing wrapper when the wrapper is missing"
+_setup
+GH_WRAPPER_ERR='gh: Not Found (HTTP 404)' _report >"$TESTTMP/rop-404" 2>&1 || true
+assert_contains "wired to claude-review" \
+  "a genuine 404 keeps the hypothesis that fits it" -- cat "$TESTTMP/rop-404"
+assert_not_contains "REREVIEW_GITHUB_TOKEN" \
+  "and does not blame a credential that worked" -- cat "$TESTTMP/rop-404"

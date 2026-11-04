@@ -95,8 +95,39 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-case "$budget" in *[!0-9]*) die "--budget must be a whole number (got '${budget}')" ;; esac
-case "$limit"  in *[!0-9]*) die "--limit must be a whole number (got '${limit}')" ;; esac
+# `''` is the arm this guard was missing, and the empty string is exactly what
+# it let through: it contains no non-digit character, so `--budget ""` passed
+# here and reached `[ "$budget" -eq 0 ]` below as a bash integer-expression
+# error on stderr plus a FALSE branch. scripts/test/cases/numeric-guards.sh
+# exists because this repository wrote that guard four times and got it right
+# once; this branch predates that check and was named by it the moment it was
+# rebased — `rereview-all.sh: $budget`, `rereview-all.sh: $limit`. The other
+# reviewer raised the same thing on 2026-09-18.
+#
+# 0 is deliberately NOT rejected, unlike report.sh's --since. It is the DEFAULT
+# of both and it carries meaning: "not given" for --budget, which the check
+# below turns into a refusal to --rerun, and "no per-repository limit" for
+# --limit. Rejecting it would refuse the script's own defaults.
+#
+# The length test, and not `[ "$n" -gt MAX ]`, because the value being guarded
+# against is one bash cannot compare without wrapping: the other reviewer
+# measured that arithmetic on 2^64 and above silently wraps, so a numeric
+# comparison is the wrong instrument for catching a number too big to compare.
+# `${#n}` is string length and cannot wrap. Seven digits is a million replays;
+# each one spends a full review, so every budget a real pass could want is
+# orders of magnitude below it, and nothing between that and 2^63 is a value
+# anyone means.
+check_count() {
+  case "$2" in
+    ''|*[!0-9]*) die "$1 must be a whole number (got '$2')" ;;
+  esac
+  if [ "${#2}" -gt 7 ]; then
+    die "$1 must be at most seven digits (got '$2')"
+  fi
+}
+
+check_count --budget "$budget"
+check_count --limit "$limit"
 
 # An unbounded fleet replay is the one mistake here with no undo: by the time
 # the summary says forty, the quota is gone. --limit does not prevent it,
