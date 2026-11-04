@@ -109,7 +109,15 @@ if ! gh api "repos/${repo}/contents/${workflow}" -H "Accept: application/vnd.git
   # promised that "the daily run starts failing and its job summary names the
   # secret to replace"; this is the line that has to make that true, raised by
   # our own reviewer on pull request #18.
+  #
+  # The rate-limit arm comes FIRST, because `case` takes the first match and
+  # GitHub answers an exhausted rate limit with a 403 too: `gh: API rate limit
+  # exceeded … (HTTP 403)` would otherwise tell the reader to replace a secret
+  # that is fine, when the remedy is to wait. Raised by both other reviewers
+  # on #18.
   case "$(head -1 "${work_dir}/wrapper.err" 2>/dev/null)" in
+    *[Rr]ate\ limit*)
+      die "could not read ${workflow} on ${repo}: GitHub's API rate limit is exhausted for the credential this run uses. Nothing is wrong with the credential or with ${repo}; wait for the limit to reset and run again. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
     *401*|*403*|*[Bb]ad\ credentials*|*"Resource not accessible"*)
       die "could not read ${workflow} on ${repo}: GitHub refused the credential. The \`REREVIEW_GITHUB_TOKEN\` secret this run authenticates with is expired, revoked, or not authorised for ${repo} — a fine-grained token expires within a year, and an expired one is still SET, so the credential guard upstream does not catch it. Replace that secret; nothing in ${repo} needs changing. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
   esac

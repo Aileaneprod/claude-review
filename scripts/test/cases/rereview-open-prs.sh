@@ -264,6 +264,17 @@ assert_contains "expired, revoked, or not authorised" \
 assert_not_contains "wired to claude-review" \
   "and does not send the reader to check a wrapper that is fine" -- cat "$TESTTMP/rop-401"
 
+# A 403 is not always the credential: GitHub answers an exhausted rate limit
+# with a 403 too, and telling the reader to replace a secret that works sends
+# them the wrong way. Raised by both other reviewers on #18.
+it "says wait, not replace the secret, when the rate limit is exhausted"
+_setup
+GH_WRAPPER_ERR='gh: API rate limit exceeded for user ID 1. (HTTP 403)' _report >"$TESTTMP/rop-rate" 2>&1 || true
+assert_contains "wait for the limit to reset" \
+  "the message gives the remedy that fits" -- cat "$TESTTMP/rop-rate"
+assert_not_contains "expired, revoked" \
+  "and does not call a working credential expired" -- cat "$TESTTMP/rop-rate"
+
 it "still says missing wrapper when the wrapper is missing"
 _setup
 GH_WRAPPER_ERR='gh: Not Found (HTTP 404)' _report >"$TESTTMP/rop-404" 2>&1 || true
