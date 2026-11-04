@@ -115,11 +115,18 @@ if ! gh api "repos/${repo}/contents/${workflow}" -H "Accept: application/vnd.git
   # exceeded … (HTTP 403)` would otherwise tell the reader to replace a secret
   # that is fine, when the remedy is to wait. Raised by both other reviewers
   # on #18.
+  #
+  # The credential arm names the secret only as the SCHEDULED case. This script
+  # is also run by hand (docs/SETUP.md), and there `gh` authenticates with
+  # whatever `gh auth status` shows, so "replace REREVIEW_GITHUB_TOKEN" alone
+  # would send a person at a terminal to fix a secret their run never used.
+  # The secret's name stays in the sentence because the scheduled summary is
+  # the promise docs/SETUP.md makes. Raised by CodeRabbit on #18.
   case "$(head -1 "${work_dir}/wrapper.err" 2>/dev/null)" in
     *[Rr]ate\ limit*)
       die "could not read ${workflow} on ${repo}: GitHub's API rate limit is exhausted for the credential this run uses. Nothing is wrong with the credential or with ${repo}; wait for the limit to reset and run again. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
     *401*|*403*|*[Bb]ad\ credentials*|*"Resource not accessible"*)
-      die "could not read ${workflow} on ${repo}: GitHub refused the credential. The \`REREVIEW_GITHUB_TOKEN\` secret this run authenticates with is expired, revoked, or not authorised for ${repo} — a fine-grained token expires within a year, and an expired one is still SET, so the credential guard upstream does not catch it. Replace that secret; nothing in ${repo} needs changing. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
+      die "could not read ${workflow} on ${repo}: GitHub refused the credential \`gh\` is using: it is expired, revoked, or not authorised for ${repo}. In the scheduled catch-up that credential is the \`REREVIEW_GITHUB_TOKEN\` secret — a fine-grained token expires within a year, and an expired one is still SET, so the credential guard upstream does not catch it; replace that secret. Run by hand, it is whatever \`gh auth status\` shows. Nothing in ${repo} needs changing. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
   esac
   die "no wrapper at ${workflow} on ${repo} — is this repository wired to claude-review? ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))"
 fi

@@ -263,6 +263,10 @@ assert_contains "expired, revoked, or not authorised" \
   "and says what is wrong with it" -- cat "$TESTTMP/rop-401"
 assert_not_contains "wired to claude-review" \
   "and does not send the reader to check a wrapper that is fine" -- cat "$TESTTMP/rop-401"
+# Run by hand, `gh` is not using that secret at all, so the message has to say
+# where the credential comes from then too. Raised by CodeRabbit on #18.
+assert_contains "gh auth status" \
+  "and tells a person at a terminal which credential was refused" -- cat "$TESTTMP/rop-401"
 
 # A 403 is not always the credential: GitHub answers an exhausted rate limit
 # with a 403 too, and telling the reader to replace a secret that works sends
