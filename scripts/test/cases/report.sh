@@ -1060,3 +1060,218 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
 " | _seed
 assert_contains "| naming a thread no longer on the pull request | 1 |" \
   "the record outlives the thread, and says so" -- _report
+
+# --- the compared reviewer being gone is not a pass, and not a pending -------
+#
+# CodeRabbit's subscription was cancelled on 2026-11-03 and drops to the free
+# tier on 2026-11-10, while this report keeps running daily from the ledger.
+# `verdict()` already refuses PASS on an empty window, so the page never read
+# green — but it read "not yet", which promises a question still being asked.
+# Once the other reviewer is off, that question can never be asked again, and
+# a reader scanning the Now column sees 0 beside "findings we did not raise".
+
+it "says the comparison has no input when theirs filed nothing"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted blocking a),
+                               $(_finding claude accepted important b)]}))
+" | _seed
+assert_contains "no findings of \`coderabbitai\` at all" \
+  "the page says the comparison has no input" -- _report
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | no data |" \
+  "the criterion reads no data, not a pending question" -- _report
+assert_contains "| Pull requests reviewed by both | >= 15 | 0 | no data |" \
+  "the window row reads no data too" -- _report
+
+# Our own precision is measured whether or not they are there. Labelling it
+# "no data" would hide a real result — the one number on this page that does
+# not depend on the other reviewer at all.
+it "never labels our own precision no data"
+assert_not_contains "| Our precision on judged findings | >= 0.95 | 1.00 | no data |" \
+  "our precision keeps its own verdict" -- _report
+
+# And the notice must not fire while they ARE filing, or it would read as an
+# outage every time a window happens to hold more of ours than theirs.
+it "stays silent while the other reviewer is still filing"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_finding coderabbitai rejected nit b)]}))
+" | _seed
+assert_not_contains "no findings of \`coderabbitai\` at all" \
+  "no notice while they are still filing" -- _report
+assert_not_contains "no data" "and no row claims missing data" -- _report
+
+# --- a reviewer whose severity this page cannot read -------------------------
+#
+# The pellets are not a native format. CodeRabbit emits them because korbyx's
+# .coderabbit.yaml instructs it to; GitHub Copilot, under evaluation on
+# KOR-970, cannot be instructed that way. Its findings would then contribute 0
+# to the blocking row, and 0 there reads as "it found no blocking defects".
+#
+# Nothing here guesses at Copilot's format. The page only says how much of a
+# side it could not read, which is the one honest thing the arithmetic can do.
+
+_plain() {
+  python3 -c "
+import json, sys
+print(json.dumps({'reviewer': sys.argv[1], 'path': 'a.ts', 'line': 3,
+                  'finding': sys.argv[2], 'author_reply': 'ok',
+                  'verdict_keyword': sys.argv[3]}))
+" "$@"
+}
+
+it "counts the findings whose severity it cannot read"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_plain copilot-pull-request-reviewer 'This loop may dereference a null pointer.' accepted),
+                               $(_plain copilot-pull-request-reviewer 'Consider extracting this helper.' rejected)]}))
+" | _seed
+assert_contains "| severity unreadable, no ruling | 0 | 2 |" \
+  "the unreadable findings are counted, per side" -- _report --theirs copilot
+assert_contains "carry no severity this page can read" \
+  "and the blocking row is marked as not a measurement" -- _report --theirs copilot
+
+# --theirs is matched by prefix, so a new reviewer needs no new parameter: the
+# account signing the review is copilot-pull-request-reviewer[bot] and
+# `--theirs copilot` reaches it. Asserted so a change to side() cannot quietly
+# drop a reviewer that is only ever named by its prefix.
+it "reaches a reviewer named only by the prefix of its account"
+assert_contains "Window: 1 pull request(s), 1 reviewed by both." \
+  "the prefix match put both reviewers on the same pull request" -- _report --theirs copilot
+
+# The escape hatch already on the page: a human rules the severity by hand.
+# This is what the Copilot trial would use until a format is agreed, so it has
+# to actually move the number.
+it "lets a human ruling rescue an unreadable severity"
+python3 -c "
+import json
+f = {'reviewer': 'copilot-pull-request-reviewer', 'path': 'a.ts', 'line': 3,
+     'finding': 'This loop may dereference a null pointer.',
+     'author_reply': 'fixed', 'verdict_keyword': 'accepted',
+     'severity_human': 'blocking', 'ruled_by': 'firas',
+     'ruling': 'null deref on the hot path, confirmed in the reply'}
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True, 'findings': [f]}))
+" | _seed
+assert_contains "| severity unreadable, no ruling | 0 | 0 |" \
+  "a ruled finding is no longer counted as unreadable" -- _report --theirs copilot
+assert_not_contains "carry no severity this page can read" \
+  "and the warning stands down once it is ruled" -- _report --theirs copilot
+
+# And it must stay quiet for a reviewer it CAN read, or every window would
+# carry the warning.
+it "stays quiet when the other reviewer's severity reads fine"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_finding coderabbitai accepted blocking b)]}))
+" | _seed
+assert_not_contains "carry no severity this page can read" \
+  "no warning for a reviewer this page can read" -- _report
+assert_contains "| severity unreadable, no ruling | 0 | 0 |" \
+  "and nothing is counted unreadable" -- _report
+
+# A fresh window after --since where NEITHER side has filed yet is a small
+# clean window, not an outage. The notice must not fire there: it is the most
+# consequential sentence on the page, and it names switching a reviewer off.
+it "stays quiet on a clean window where neither side filed"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True, 'findings': []}))
+" | _seed
+assert_not_contains "no findings of \`coderabbitai\` at all" \
+  "an empty window is not reported as a missing reviewer" -- _report
+assert_not_contains "no data" "and no row claims missing data" -- _report
+
+# --- an unread severity cannot be a pass --------------------------------------
+#
+# Raised by the other reviewer on this change's own pull request (#40), and it
+# was right twice over. The first version of the unreadable-severity notice
+# suppressed itself as soon as ANY finding of theirs came out blocking, and it
+# left the verdict alone — so on a window past MIN_BOTH with the criterion at
+# 0, the row read PASS, the strongest claim this page makes, while findings of
+# theirs the author had ACCEPTED sat there with no severity anyone had read.
+
+# Fifteen pull requests reviewed by both, the criterion at 0 — a window that
+# has earned a PASS on the blocking row — plus one accepted finding of theirs
+# whose severity this page cannot read.
+_seed_unread() {
+  rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+  python3 -c "
+import json, sys
+unread = sys.argv[2] == 'yes'
+for pr in range(1, 16):
+    theirs = [{'reviewer': 'coderabbitai', 'path': 'b.ts', 'line': 2,
+               'finding': '🟡 Nit — y', 'author_reply': 'Retenu',
+               'verdict_keyword': 'accepted'}]
+    if unread and pr == 1:
+        theirs.append({'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                       'finding': 'A plain sentence with no pellet at all.',
+                       'author_reply': 'Corrige', 'verdict_keyword': 'accepted'})
+    json.dump({'repo': 'Aileaneprod/korbyx', 'pr': pr, 'title': 't',
+               'reviewed_by_ours': True,
+               'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                             'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                             'verdict_keyword': 'accepted'}] + theirs},
+              open('%s/%d.json' % (sys.argv[1], pr), 'w', encoding='utf-8'))
+" "$(_led)/Aileaneprod/korbyx" "$1"
+}
+
+it "earns the PASS when every severity of theirs was read"
+_seed_unread no
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | PASS |" \
+  "a fully readable window passes on its own" -- _report
+
+it "withholds the PASS while an accepted finding of theirs has no severity"
+_seed_unread yes
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet (severity unread) |" \
+  "the strongest claim on the page is not made on untested input" -- _report
+assert_not_contains "| Blocking findings of theirs we did not raise | 0 | 0 | PASS |" \
+  "and the PASS is gone" -- _report
+assert_contains "the author accepted 1 of those" \
+  "the sentence counts the accepted ones, which are what the criterion draws from" -- _report
+
+# A readable blocking finding does not make the unreadable ones readable, and
+# the ones hidden behind it are exactly what is at stake.
+it "keeps warning when another finding of theirs did come out blocking"
+rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_finding coderabbitai accepted blocking b),
+                               {'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                                'finding': 'A plain sentence with no pellet at all.',
+                                'author_reply': 'Corrige', 'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "carry no severity this page can read" \
+  "a blocking finding beside it does not silence the warning" -- _report
+
+# A REJECTED finding with no severity could not have been a blocking miss, so
+# it must not hold the criterion back.
+it "ignores an unreadable severity the author rejected"
+rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_finding coderabbitai accepted nit b),
+                               {'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                                'finding': 'A plain sentence with no pellet at all.',
+                                'author_reply': 'Ecarte', 'verdict_keyword': 'rejected'}]}))
+" | _seed
+assert_not_contains "carry no severity this page can read" \
+  "a rejected finding cannot have been a blocking miss" -- _report
