@@ -1180,3 +1180,16 @@ assert_not_contains "carry no severity this page can read" \
   "no warning for a reviewer this page can read" -- _report
 assert_contains "| severity unreadable, no ruling | 0 | 0 |" \
   "and nothing is counted unreadable" -- _report
+
+# A fresh window after --since where NEITHER side has filed yet is a small
+# clean window, not an outage. The notice must not fire there: it is the most
+# consequential sentence on the page, and it names switching a reviewer off.
+it "stays quiet on a clean window where neither side filed"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True, 'findings': []}))
+" | _seed
+assert_not_contains "no findings of \`coderabbitai\` at all" \
+  "an empty window is not reported as a missing reviewer" -- _report
+assert_not_contains "no data" "and no row claims missing data" -- _report

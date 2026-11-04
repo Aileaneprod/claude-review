@@ -857,7 +857,13 @@ w("")
 VERDICT_KEYS = ("accepted", "partial", "rejected",
                 "acknowledged", "no_reply", "unknown")
 theirs_filed = sum(totals["theirs"][k] for k in VERDICT_KEYS)
-no_compare = bool(prs) and not theirs_filed
+ours_filed = sum(totals["ours"][k] for k in VERDICT_KEYS)
+# Gated on OURS having filed as well. A fresh window after --since where
+# neither side has filed anything yet is a small clean window, not an outage,
+# and announcing "if that reviewer has been switched off" there would be a
+# false positive on the most consequential sentence this page prints. "We
+# filed, they did not" is the observation that means something.
+no_compare = bool(prs) and bool(ours_filed) and not theirs_filed
 
 if no_compare:
     w("> **This window holds no findings of `%s` at all, so the comparison has"

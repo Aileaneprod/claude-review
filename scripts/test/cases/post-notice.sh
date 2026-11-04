@@ -186,3 +186,15 @@ _setup empty
 gh() { echo "$*" >> "$GH_LOG"; echo 'gh: Bad credentials (HTTP 401)' >&2; return 1; }
 export -f gh
 assert_status 0 "an unreadable thread does not fail the job" -- _post
+
+# --- a pull request that never had a notice -----------------------------------
+#
+# The common case: a review succeeds on a pull request nothing ever failed on.
+# `collapsed` there would say a notice was retracted when none existed, and
+# the witness is read by the workflow.
+
+it "says absent when there is no notice to retract"
+_setup empty
+_collapse >/dev/null 2>&1
+assert_equal "absent" "$(_state)" "nothing was retracted, and the witness says so"
+assert_not_contains "--method" "no write was attempted at all" -- _calls

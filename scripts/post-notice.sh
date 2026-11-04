@@ -246,22 +246,36 @@ with open(payload_path, "w", encoding="utf-8") as handle:
     json.dump({"body": marker_prefix + " -->\n" + tail}, handle)
 PY
 
+collapse_ids="$(python3 -c '
+import json, sys
+print(" ".join(str(i) for i in json.load(open(sys.argv[1]))["collapse"]))
+' "${work_dir}/plan.json")"
+
+# The witness speaks the vocabulary the header documents, not the plan's own
+# verbs. `absent` is a collapse with nothing to collapse — a successful review
+# on a pull request that never had a notice, which is the common case and must
+# not read like a notice was retracted.
+state_for() {
+  case "$1" in
+    create)   printf created ;;
+    patch)    printf updated ;;
+    collapse) [ -n "$collapse_ids" ] && printf collapsed || printf absent ;;
+  esac
+}
+
 if [ "$dry_run" -eq 1 ]; then
   printf 'post-notice: dry run — would %s\n' "$action" >&2
   if [ "$action" != "collapse" ]; then
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["body"])' \
       "${work_dir}/payload.json"
   fi
-  record_state "$action"
+  record_state "$(state_for "$action")"
   exit 0
 fi
 
 # Collapse first. If the create below fails, the thread is left with collapsed
 # stubs and no alarm, which is quieter than two live notices.
-for stale_id in $(python3 -c '
-import json, sys
-print(" ".join(str(i) for i in json.load(open(sys.argv[1]))["collapse"]))
-' "${work_dir}/plan.json"); do
+for stale_id in $collapse_ids; do
   gh api "repos/${repo}/issues/comments/${stale_id}" \
     --method PATCH --input "${work_dir}/collapsed.json" >/dev/null 2>&1 \
     && printf 'post-notice: collapsed notice %s\n' "$stale_id" >&2 \
@@ -270,7 +284,7 @@ done
 
 case "$action" in
   collapse)
-    record_state collapsed
+    record_state "$(state_for collapse)"
     ;;
   patch)
     comment_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "${work_dir}/plan.json")"
