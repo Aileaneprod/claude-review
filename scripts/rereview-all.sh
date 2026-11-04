@@ -118,8 +118,22 @@ done
 # orders of magnitude below it, and nothing between that and 2^63 is a value
 # anyone means.
 check_count() {
+  # `0?*` is the leading-zero arm, and it is the one I left out when this guard
+  # was written an hour earlier: I reasoned that 0 must stay legal, which is
+  # true, and stopped there. `08` and `010` also pass `*[!0-9]*`, and bash
+  # arithmetic reads them as OCTAL — measured on this machine:
+  #
+  #   $((08 - 1))   -> 08: value too great for base (error token is "08")
+  #   $((010 - 1))  -> 7
+  #
+  # So `--budget 08` died inside `$((budget - spent))` AFTER replays had been
+  # engaged, and `--budget 010` bounded the pass at 8 while the report said
+  # "budget of 010". report.sh:208 has rejected `0*` since long before this
+  # branch; the pattern existed in this repository and I did not apply it.
+  # Raised by a cross-model audit on 2026-11-04.
   case "$2" in
     ''|*[!0-9]*) die "$1 must be a whole number (got '$2')" ;;
+    0?*)         die "$1 must not have a leading zero (got '$2') — bash reads it as octal" ;;
   esac
   if [ "${#2}" -gt 7 ]; then
     die "$1 must be at most seven digits (got '$2')"
@@ -253,10 +267,27 @@ while read -r repo workflow; do
     # the count of ACTUAL replays exists — a target that refuses `gh run rerun`
     # is listed and not replayed, and charging the budget for it would spend
     # the pass on failures.
-    got="$(sed -n 's/^rereview-open-prs: replayed \([0-9][0-9]*\) of .*/\1/p' "$out" | tail -1)"
+    # Counted from the PER-REPLAY lines, not from the child's closing tally.
+    #
+    # The tally is printed once, at the end, so reading it meant an entry killed
+    # after replaying one of two reported nothing spent — and the NEXT entry
+    # then received the full budget again. With a budget of 2, three replays
+    # could be engaged. The budget is the one mistake in this script with no
+    # undo, so the direction of the error mattered: it was the wrong one.
+    # Raised by a cross-model audit on 2026-11-04.
+    #
+    # `  replayed PR N (run M)` is printed as each replay SUCCEEDS, so it
+    # survives the child dying, and it counts only replays that happened — a
+    # target that refuses `gh run rerun` prints a different line and is not
+    # charged. The first fix for this charged the whole allowance whenever the
+    # child came back unclean; that bounded the budget and spent it on a
+    # repository that may have died before replaying anything, starving the
+    # rest of the list. Counting what actually happened needs no such trade.
+    got="$(grep -c '^  replayed PR ' "$out" 2>/dev/null || true)"
     case "${got:-}" in ''|*[!0-9]*) got=0 ;; esac
     spent=$((spent + got))
     remaining=$((budget - spent))
+    [ "$remaining" -ge 0 ] || remaining=0
   fi
 
   {

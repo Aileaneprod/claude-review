@@ -89,6 +89,14 @@ _setup() {
         [ "${GH_BREAK:-}" = "refuse-runs-$sha" ] && return 1
         cat "$GH_FIX/runs-${sha}.json" ;;
       *"run rerun"*)
+        # GH_RERUN_FAIL turns every replay down the way GitHub does when the
+        # run is too old to re-run, or the token lacks `actions: write`. It is
+        # the only way to reach the path where every read succeeded and nothing
+        # was replayed.
+        if [ -n "${GH_RERUN_FAIL:-}" ]; then
+          echo 'gh: Unable to retry this run (HTTP 403)' >&2
+          return 1
+        fi
         return 0 ;;
       *)
         echo '{}' ;;
@@ -263,3 +271,29 @@ assert_contains "wired to claude-review" \
   "a genuine 404 keeps the hypothesis that fits it" -- cat "$TESTTMP/rop-404"
 assert_not_contains "REREVIEW_GITHUB_TOKEN" \
   "and does not blame a credential that worked" -- cat "$TESTTMP/rop-404"
+
+# --- replays that were all refused are not a clean pass -----------------------
+#
+# Raised by a cross-model audit on 2026-11-04. Every read succeeding and every
+# `gh run rerun` being turned down left `unknown` at zero, so this script
+# printed "replayed 0 of N." and exited 0 — and the scheduled parent recorded
+# the repository as clean while nothing had been replayed. The premise of this
+# tool is that nobody is watching, so the status is the only channel that
+# reaches a person.
+
+it "exits non-zero when every replay was refused"
+_setup
+assert_status 1 "a repository whose replays were all refused did not come back clean" \
+  -- env GH_RERUN_FAIL=1 "$SCRIPTS/rereview-open-prs.sh" --repo o/r --rerun --limit 2
+
+it "names each refusal so the reason reaches the log"
+_setup
+GH_RERUN_FAIL=1 "$SCRIPTS/rereview-open-prs.sh" --repo o/r --rerun --limit 2 \
+  >"$TESTTMP/rop-refused" 2>&1 || true
+assert_contains "refused the replay" "the refusal is printed, not swallowed" \
+  -- cat "$TESTTMP/rop-refused"
+
+it "still exits zero when the replays went through"
+_setup
+assert_status 0 "a clean replay keeps the clean status" \
+  -- "$SCRIPTS/rereview-open-prs.sh" --repo o/r --rerun --limit 2

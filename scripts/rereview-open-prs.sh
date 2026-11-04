@@ -175,11 +175,23 @@ encoded_check="$(python3 -c \
 targets=""
 unreviewed=0
 unknown=0
+# Replays this run asked for and did not get. Counted apart from `unknown`,
+# which is about pull requests it could not INSPECT: a refused replay was
+# inspected correctly and then not carried out.
+refused=0
 
 # One exit, so that no branch of this can forget what an uninspected pull
 # request does to the answer. A caller that reads no output at all — a
 # scheduled one — has only the status to go on.
-finish() { [ "$unknown" -eq 0 ] || exit 1; exit 0; }
+#
+# `refused` joins it for the same reason. A run where every read succeeded and
+# every `gh run rerun` was turned down left `unknown` at zero and exited 0, so
+# a scheduled parent recorded the repository as clean while nothing had been
+# replayed. Measured: two refusals printed "replayed 0 of 2." and exited 0.
+# This script's own header promises exit 1 when a repository "did not come
+# back clean", and one whose replays were all refused did not. Raised by a
+# cross-model audit on 2026-11-04.
+finish() { { [ "$unknown" -eq 0 ] && [ "$refused" -eq 0 ]; } || exit 1; exit 0; }
 
 while IFS="	" read -r number sha ref; do
   [ -n "$number" ] || continue
@@ -337,6 +349,7 @@ while read -r number run_id; do
     replayed=$((replayed + 1))
     printf '  replayed PR %s (run %s)\n' "$number" "$run_id"
   else
+    refused=$((refused + 1))
     printf '  PR %s (run %s) refused the replay: %s\n' \
       "$number" "$run_id" "$(head -1 "${work_dir}/rerun.err" 2>/dev/null)" >&2
   fi
