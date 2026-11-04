@@ -314,4 +314,4 @@ assert_contains "Replayed **2** review(s)" \
 assert_contains "Up to 1 more replay(s) are uncertain" \
   "and states the uncertain one apart from them" -- cat "$TESTTMP/ra-killed"
 assert_contains "Killed before it finished" \
-  "in the header and in the block of the repository it happened to" -- cat "$TESTTMP/ra-killed"
+  "and the block of the repository it happened to says so" -- cat "$TESTTMP/ra-killed"
