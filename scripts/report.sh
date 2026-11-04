@@ -535,6 +535,22 @@ for key in ("ours", "theirs"):
     # assigned and a label the reviewer wrote are different evidence, and the
     # page that decides has to be able to say which it is counting.
     totals[key]["header_label"] = 0
+    # And how many carried NO readable severity at all — neither a pellet in
+    # the prose nor a header this page knows how to read.
+    #
+    # This is the number that decides whether a new reviewer can be compared
+    # at all. The pellets are not a native format: CodeRabbit emits them
+    # because korbyx's own .coderabbit.yaml instructs it to, and a reviewer
+    # that cannot be instructed that way — GitHub Copilot, under evaluation on
+    # KOR-970 — files findings whose severity reads as nothing. Without this
+    # count its blocking findings would be 0 in the head-to-head row, and 0
+    # there is indistinguishable from "it found none". The page would then
+    # report perfect recall against a reviewer it could not read.
+    #
+    # Deliberately NOT a guess at another format. The remedy already on this
+    # page is a human's ruling (`severity_human`), and the only honest thing
+    # the arithmetic can do is say how much of it is unreadable.
+    totals[key]["no_severity"] = 0
     # And how many rest on a human's ruling rather than on any reading of the
     # text at all. Same rule, same reason: a number a person decided and a
     # number a classifier decided are different evidence.
@@ -648,6 +664,8 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
         # header would be describing a number this page no longer prints.
         if ruled_label is None and base_source == "header":
             totals[which]["header_label"] += 1
+        if ruled_label is None and base_source == "none":
+            totals[which]["no_severity"] += 1
         if base_source == "header":
             unruled[which]["header_label"] += 1
         if ruled_verdict:
@@ -819,6 +837,55 @@ if since_note:
     w("")
     w("> %s" % since_note)
 w("")
+
+# WHEN THE COMPARED REVIEWER HAS NOTHING IN THE WINDOW.
+#
+# Two of the criteria below are a COMPARISON. A comparison with no input does
+# not become true, it becomes unanswerable — and the table has no way to say
+# that. `verdict()` correctly refuses to print PASS on an empty window, so the
+# page does not read green; it reads "not yet", which promises a question still
+# being asked. Once the other reviewer is switched off that question can never
+# be asked again, and the page would say "not yet" forever while a reader
+# scanning the Now column sees a 0 next to "findings we did not raise".
+#
+# This is not hypothetical. CodeRabbit's subscription was cancelled on
+# 2026-11-03 and drops to the free tier on 2026-11-10, and this report runs
+# daily from the ledger. Measured here before the change, on a window of one
+# pull request with findings of ours and none of theirs: exit 0, no crash,
+# `n/a` for their precision, and three rows reading "not yet" with no
+# indication that nothing was compared.
+VERDICT_KEYS = ("accepted", "partial", "rejected",
+                "acknowledged", "no_reply", "unknown")
+theirs_filed = sum(totals["theirs"][k] for k in VERDICT_KEYS)
+no_compare = bool(prs) and not theirs_filed
+
+if no_compare:
+    w("> **This window holds no findings of `%s` at all, so the comparison has"
+      " no input.** The zeros below are the absence of data, not the absence of"
+      " misses, and `Pull requests reviewed by both` cannot rise while that"
+      " stays true — these criteria will read `no data` indefinitely rather"
+      " than ever being met. If that reviewer has been switched off, this page"
+      " needs a transition report or a new `--theirs`." % theirs_name)
+    w("")
+
+# AND WHEN IT IS THERE BUT CANNOT BE READ.
+#
+# The criterion counts findings of theirs labelled blocking. A reviewer whose
+# severity this page cannot read contributes zero to it — and zero there reads
+# as "it found no blocking defects", which is the same misleading zero as the
+# empty window above, arrived at from the other direction. The condition is
+# exact rather than a threshold: they filed, some of it was unreadable, and the
+# number that decides came out 0 anyway.
+theirs_unreadable = totals["theirs"]["no_severity"]
+if theirs_filed and theirs_unreadable and not totals["theirs"]["blocking_accepted"]:
+    w("> **%d of `%s`'s %d finding(s) in this window carry no severity this"
+      " page can read, and none of the rest came out blocking.** So the"
+      " blocking row below is not a measurement of what they caught. Severity"
+      " is read from the 🔴/🟠/🟡/🟣 pellets or from a header this page knows;"
+      " a reviewer that cannot be configured to emit either needs its findings"
+      " ruled by hand (`severity_human`, below) before this comparison means"
+      " anything." % (theirs_unreadable, theirs_name, theirs_filed))
+    w("")
 # PASS is a claim that a criterion was MET. It requires a window big enough to
 # have tested it; "not yet" is what an unasked question deserves.
 #
@@ -861,8 +928,14 @@ def verdict(failed, ok):
 
 w("| Exit criterion | Target | Now | |")
 w("|---|---|---|---|")
+# "no data" only where the number DEPENDS on the other reviewer. Our own
+# precision below is measured either way — it is thin or it is low, but it is
+# not missing — and labelling it "no data" would hide a real result.
+criterion_status = verdict(bool(criterion), True)
+if no_compare and criterion_status == "not yet":
+    criterion_status = "no data"
 w("| Blocking findings of theirs we did not raise | 0 | %d | %s |"
-  % (criterion, verdict(bool(criterion), True)))
+  % (criterion, criterion_status))
 precision_verdict = verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)
 if classifier_uncertified and precision_verdict == "PASS":
     precision_verdict = "not yet (provisional)"
@@ -873,7 +946,8 @@ if gold_pct is not None:
       % (GOLD_GATE, truncated(gold_pct, 1), gold_agreed, gold_checked,
          "PASS" if not classifier_uncertified else "FAIL"))
 w("| Pull requests reviewed by both | >= %d | %d | %s |"
-  % (MIN_BOTH, both_reviewed, "PASS" if enough else "not yet"))
+  % (MIN_BOTH, both_reviewed,
+     "PASS" if enough else ("no data" if no_compare else "not yet")))
 w("")
 # The definition travels with the number. Two different questions live on this
 # page — "how many findings of theirs did we not raise" and "on how many pull
@@ -1019,6 +1093,8 @@ w("| of those, our summary called blocking anyway | — | %d |"
   % supp_blocking_agreed)
 w("| severity read off the header, not the prose | %d | %d |"
   % (totals["ours"]["header_label"], totals["theirs"]["header_label"]))
+w("| severity unreadable, no ruling | %d | %d |"
+  % (totals["ours"]["no_severity"], totals["theirs"]["no_severity"]))
 w("| verdict set by a human ruling, not the classifier | %d | %d |"
   % (totals["ours"]["ruled_verdict"], totals["theirs"]["ruled_verdict"]))
 w("| severity set by a human ruling, not the text | %d | %d |"
