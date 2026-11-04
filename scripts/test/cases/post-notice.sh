@@ -50,6 +50,14 @@ def legacy(cid, when):
                     "usage limit. %s" % (ROBOT, TAIL)}
 
 
+def stub(cid, when):
+    """A notice an earlier run already collapsed."""
+    return {"id": cid, "user": BOT, "created_at": when,
+            "body": "<!-- claude-review:notice -->" + "\n"
+                    + "_Superseded - see the current notice at the end of "
+                      "this pull request._"}
+
+
 def summary(cid):
     return {"id": cid, "user": BOT, "created_at": "2026-10-01T00:00:00Z",
             "body": "<!-- claude-review:summary -->\nWalkthrough — the real "
@@ -71,6 +79,10 @@ sets = {
     # Everything that must survive untouched, in one list.
     "bystanders": [summary(41), human(42)],
     "legacy-plus-summary": [summary(51), legacy(52, "2026-11-04T07:42:15Z")],
+    "stubs-only": [stub(61, "2026-11-03T12:50:04Z"),
+                   stub(62, "2026-11-03T15:09:25Z")],
+    "stubs-plus-live": [stub(71, "2026-11-03T12:50:04Z"), notice(72, sha)],
+    "stub-plus-summary": [summary(81), stub(82, "2026-11-03T12:50:04Z")],
 }
 
 # `gh api --paginate --slurp` answers with an array of PAGES.
@@ -198,3 +210,43 @@ _setup empty
 _collapse >/dev/null 2>&1
 assert_equal "absent" "$(_state)" "nothing was retracted, and the witness says so"
 assert_not_contains "--method" "no write was attempted at all" -- _calls
+
+# --- a stub is not a notice ---------------------------------------------------
+#
+# Raised by the other reviewer on this change's own pull request (#40). The
+# collapsed stub keeps the marker, so `is_notice` matched it and every later
+# run put it back in the collapse list: one PATCH per stub per unreviewed push,
+# the count growing with the pile — on the script written to stop a pile
+# growing. And `--collapse` on a pull request holding only stubs reported
+# `collapsed` where `absent` is correct.
+
+it "reports absent when only already-collapsed stubs remain"
+_setup stubs-only
+_collapse >/dev/null 2>&1
+assert_equal "absent" "$(_state)" "stubs are not notices to retract"
+assert_not_contains "--method" "and nothing is rewritten" -- _calls
+
+it "does not re-collapse a stub when posting a new notice"
+_setup stubs-only
+_post >/dev/null 2>&1
+assert_equal "created" "$(_state)" "the new notice is still posted"
+assert_not_contains "issues/comments/61 --method PATCH" "the first stub is left alone" -- _calls
+assert_not_contains "issues/comments/62 --method PATCH" "and so is the second" -- _calls
+
+it "still updates the live notice sitting beside a stub"
+_setup stubs-plus-live
+_post >/dev/null 2>&1
+assert_equal "updated" "$(_state)" "the live notice for this push was reused"
+assert_contains "issues/comments/72 --method PATCH" "the live notice was patched" -- _calls
+assert_not_contains "issues/comments/71 --method PATCH" "the stub beside it was not" -- _calls
+
+# Both the stub and the sticky summary open on `<!-- claude-review:`, and
+# is_stub() tests the NOTICE prefix plus " -->". That the summary does not
+# match is the kind of thing to prove rather than reason about: rewriting it
+# would delete the review itself.
+it "tells a stub from the sticky summary beside it"
+_setup stub-plus-summary
+_collapse >/dev/null 2>&1
+assert_equal "absent" "$(_state)" "neither of them is a notice to retract"
+assert_not_contains "issues/comments/81" "the summary is untouched" -- _calls
+assert_not_contains "issues/comments/82" "and so is the stub" -- _calls

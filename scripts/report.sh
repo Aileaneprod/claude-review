@@ -551,6 +551,11 @@ for key in ("ours", "theirs"):
     # page is a human's ruling (`severity_human`), and the only honest thing
     # the arithmetic can do is say how much of it is unreadable.
     totals[key]["no_severity"] = 0
+    # And how many of THOSE the author accepted or partly accepted. That is
+    # the population the blocking criterion draws from, so it is the one that
+    # decides whether the criterion has been tested at all. A rejected finding
+    # whose severity is unreadable cannot have been a blocking miss.
+    totals[key]["no_severity_judged"] = 0
     # And how many rest on a human's ruling rather than on any reading of the
     # text at all. Same rule, same reason: a number a person decided and a
     # number a classifier decided are different evidence.
@@ -666,6 +671,8 @@ for (repo, number), doc in sorted(prs.items(), key=lambda kv: (kv[0][0] or "", k
             totals[which]["header_label"] += 1
         if ruled_label is None and base_source == "none":
             totals[which]["no_severity"] += 1
+            if verdict in ("accepted", "partial"):
+                totals[which]["no_severity_judged"] += 1
         if base_source == "header":
             unruled[which]["header_label"] += 1
         if ruled_verdict:
@@ -879,18 +886,39 @@ if no_compare:
 # The criterion counts findings of theirs labelled blocking. A reviewer whose
 # severity this page cannot read contributes zero to it — and zero there reads
 # as "it found no blocking defects", which is the same misleading zero as the
-# empty window above, arrived at from the other direction. The condition is
-# exact rather than a threshold: they filed, some of it was unreadable, and the
-# number that decides came out 0 anyway.
+# empty window above, arrived at from the other direction.
+#
+# The population is the ACCEPTED or PARTLY accepted ones. Those are what the
+# criterion draws from, so an unreadable severity among them means the
+# criterion was never tested; a rejected finding could not have been a
+# blocking miss whatever its label said.
+#
+# Two mistakes the first version of this made, both found by the other
+# reviewer on this change's own pull request (#40) and both the defect this
+# whole file is about:
+#
+#   * it suppressed the warning when ANY finding of theirs came out blocking.
+#     One readable blocking finding does not make the unreadable ones
+#     readable, and the ones hidden behind it are exactly what is at stake.
+#   * it left the verdict alone. On a window past MIN_BOTH with the criterion
+#     at 0, the row read PASS — "we miss nothing of theirs" — while findings
+#     of theirs sat there with no severity anyone had read. That is the
+#     strongest claim this page makes, made on untested input.
+#
+# So the count gates the VERDICT too, below, on the same principle the
+# classifier's gold gate already applies to precision: where the measuring
+# instrument is uncertified, the row it feeds cannot be called passed.
 theirs_unreadable = totals["theirs"]["no_severity"]
-if theirs_filed and theirs_unreadable and not totals["theirs"]["blocking_accepted"]:
+theirs_unreadable_judged = totals["theirs"]["no_severity_judged"]
+if theirs_unreadable_judged:
     w("> **%d of `%s`'s %d finding(s) in this window carry no severity this"
-      " page can read, and none of the rest came out blocking.** So the"
-      " blocking row below is not a measurement of what they caught. Severity"
-      " is read from the 🔴/🟠/🟡/🟣 pellets or from a header this page knows;"
-      " a reviewer that cannot be configured to emit either needs its findings"
-      " ruled by hand (`severity_human`, below) before this comparison means"
-      " anything." % (theirs_unreadable, theirs_name, theirs_filed))
+      " page can read, and the author accepted %d of those.** So the blocking"
+      " row below is not a measurement of what they caught, and it cannot"
+      " pass. Severity is read from the 🔴/🟠/🟡/🟣 pellets or from a header"
+      " this page knows; a reviewer that cannot be configured to emit either"
+      " needs its findings ruled by hand (`severity_human`, below) before this"
+      " comparison means anything."
+      % (theirs_unreadable, theirs_name, theirs_filed, theirs_unreadable_judged))
     w("")
 # PASS is a claim that a criterion was MET. It requires a window big enough to
 # have tested it; "not yet" is what an unasked question deserves.
@@ -940,6 +968,13 @@ w("|---|---|---|---|")
 criterion_status = verdict(bool(criterion), True)
 if no_compare and criterion_status == "not yet":
     criterion_status = "no data"
+# A PASS here is the claim "we miss nothing of theirs". It cannot be made while
+# findings of theirs the author ACCEPTED carry a severity nobody has read: one
+# of them may be the blocking miss this row counts. Same shape as the gold
+# gate on precision — nothing was measured wrong, the input is incomplete — so
+# it reads "not yet", never FAIL, and says why in the sentence above.
+if theirs_unreadable_judged and criterion_status == "PASS":
+    criterion_status = "not yet (severity unread)"
 w("| Blocking findings of theirs we did not raise | 0 | %d | %s |"
   % (criterion, criterion_status))
 precision_verdict = verdict(ours_p is not None and ours_p < 0.95, ours_p is not None)

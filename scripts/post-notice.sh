@@ -180,7 +180,21 @@ def about_this_push(comment):
     return ("sha=" + sha) in head
 
 
-notices = [c for c in comments if is_notice(c)]
+def is_stub(comment):
+    """A notice this script already collapsed; nothing left to rewrite.
+
+    A live notice carries ` sha=` after the prefix; a stub carries ` -->`.
+    Without this the stubs come back into `notices` on every later run, which
+    costs one PATCH per stub per unreviewed push — the count growing with the
+    pile, on a script written to stop a pile growing — and makes `--collapse`
+    on a pull request holding only stubs report `collapsed` where `absent` is
+    correct, contradicting what state_for() below promises.
+    """
+    body = (comment.get("body") or "").lstrip()
+    return body.startswith(marker_prefix + " -->")
+
+
+notices = [c for c in comments if is_notice(c) and not is_stub(c)]
 notices.sort(key=lambda c: (c.get("created_at") or "", c.get("id") or 0))
 
 if collapse_all:

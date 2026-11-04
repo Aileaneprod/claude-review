@@ -86,6 +86,14 @@ _sandbox() {
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >> "%s/posted"\n' "$box" > "$box/bin/gh"
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >> "%s/posted"\n' "$box" \
     > "$box/.claude-review-tooling/scripts/publish-outcome-check.sh"
+  # The notice comment goes through post-notice.sh, which takes its body in a
+  # FILE. Recording the arguments alone would leave the sentence the author
+  # actually reads untested — and that sentence is what the cases below are
+  # about — so any argument that is a readable file has its contents recorded
+  # too. Its own behaviour (one live notice, keyed on the push) is covered in
+  # scripts/test/cases/post-notice.sh; here it stands in for the post.
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@" >> "%s/posted"\nfor a in "$@"; do [ -f "$a" ] && cat "$a" >> "%s/posted"; done\nexit 0\n' \
+    "$box" "$box" > "$box/.claude-review-tooling/scripts/post-notice.sh"
   chmod +x "$box/bin/gh" "$box/.claude-review-tooling/scripts/"*.sh
   : > "$box/output"; : > "$box/summary"; : > "$box/posted"
   printf '%s' "$box"
@@ -428,3 +436,51 @@ esac
 box="$(_sandbox duration-none)"
 _run_step duration "$box" START=
 assert_equal "(unset)" "$(_output "$box" seconds)" "no start, no duration rather than a made-up one"
+
+# --- the reviewer that was refused before it started --------------------------
+#
+# Measured on this repository's own pull request #40, which changes review.yml:
+# the job went green in 19 seconds, `AI review outcome` published `neutral`,
+# and the notice read "The reviewer did not complete" — the sentence a timeout,
+# an expired token and a crash all produce. The real cause was in the action's
+# log and nowhere else: the Claude GitHub App refuses a run whose reusable
+# workflow differs from the copy on the default branch, so a pull request that
+# CHANGES a workflow file cannot be reviewed until it merges.
+#
+# It is also the first review every repository gets when the wrapper arrives by
+# pull request, which is what install-wrapper.sh creates.
+
+it "says the reviewer was refused before starting, not that it did not complete"
+box="$(_sandbox notice-never-started)"
+_run_step "Report that the review was unavailable" "$box" \
+  EXECUTION_FILE= VERDICT=unavailable CREDENTIAL=primary ACTION_OUTCOME=success \
+  PR_NUMBER=1 HEAD_SHA=0000000 GH_TOKEN=unused
+assert_contains "exited before starting" \
+  "the notice says the reviewer never ran" -- cat "$box/posted"
+assert_contains "identical content" \
+  "and names the App's workflow validation as the documented cause" -- cat "$box/posted"
+assert_not_contains "The reviewer did not complete." \
+  "instead of the sentence every other failure also produces" -- cat "$box/posted"
+
+# The signature is a green step with NO execution trace. A run that crashed
+# wrote one, and explain-failure.sh reads the real cause out of it — claiming
+# "never started" there would be the same defect in the other direction.
+it "does not claim it never started when there is an execution trace"
+box="$(_sandbox notice-crashed)"
+_run_step "Report that the review was unavailable" "$box" \
+  EXECUTION_FILE="$FIXTURES/api-429-quota.json" VERDICT=unavailable \
+  CREDENTIAL=primary ACTION_OUTCOME=success \
+  PR_NUMBER=1 HEAD_SHA=0000000 GH_TOKEN=unused
+assert_not_contains "exited before starting" \
+  "a run with a trace keeps its measured cause" -- cat "$box/posted"
+assert_contains "usage limit" "which here is the usage limit" -- cat "$box/posted"
+
+# And a step that went RED did run and fail. Only a green one that left nothing
+# behind can have exited before starting.
+it "does not claim it never started when the step itself failed"
+box="$(_sandbox notice-step-failed)"
+_run_step "Report that the review was unavailable" "$box" \
+  EXECUTION_FILE= VERDICT=unavailable CREDENTIAL=primary ACTION_OUTCOME=failure \
+  PR_NUMBER=1 HEAD_SHA=0000000 GH_TOKEN=unused
+assert_not_contains "exited before starting" \
+  "a failed step is not a step that never started" -- cat "$box/posted"

@@ -856,6 +856,24 @@ jobs:
           RETRIED: ${{ steps.fallback.outputs.use }}
           PRIMARY: ${{ steps.claude.outputs.execution_file }}
           FALLBACK: ${{ steps.claude_fallback.outputs.execution_file }}
+          # Whether the action STEP ended green, carried through so the notice
+          # can tell "it ran and failed" from "it never ran". A review that
+          # crashes still writes an execution file — explain-failure.sh is
+          # built on that — so a green step with NO execution file is the
+          # signature of an action that exited before starting.
+          #
+          # `outcome` and not `outputs.conclusion`, though the action declares
+          # one and emits it (`conclusion=success` in the run log of this
+          # repository's #40). actionlint's bundled metadata for
+          # claude-code-action@v1 does not list that output, so reading it
+          # fails the local gate docs/TUNING.md mandates. Suppressing the gate
+          # to keep the nicer name is the wrong trade: `outcome` is a built-in
+          # step context, always defined, owes nothing to a third party's
+          # metadata, and says the same thing here. `continue-on-error: true`
+          # on both steps is what makes it the TRUE result rather than always
+          # `success`.
+          PRIMARY_OUTCOME: ${{ steps.claude.outcome }}
+          FALLBACK_OUTCOME: ${{ steps.claude_fallback.outcome }}
         run: |
           set -euo pipefail
           if [ "${RETRIED:-}" = yes ]; then
@@ -865,6 +883,7 @@ jobs:
             fi
             echo "execution_file=${file}" >> "$GITHUB_OUTPUT"
             echo "credential=fallback" >> "$GITHUB_OUTPUT"
+            echo "step_outcome=${FALLBACK_OUTCOME:-}" >> "$GITHUB_OUTPUT"
             # Loud on purpose. A fallback that works hides the reason it was
             # needed: an EXPIRED first token (401) would be covered on every
             # review, silently, until the fallback's own quota ran out too.
@@ -873,6 +892,7 @@ jobs:
           else
             echo "execution_file=${PRIMARY:-}" >> "$GITHUB_OUTPUT"
             echo "credential=primary" >> "$GITHUB_OUTPUT"
+            echo "step_outcome=${PRIMARY_OUTCOME:-}" >> "$GITHUB_OUTPUT"
           fi
 
       # The evidence. `execution_file` is the only record of what the reviewer
@@ -1082,6 +1102,7 @@ jobs:
           EXECUTION_FILE: ${{ steps.review_result.outputs.execution_file }}
           VERDICT: ${{ steps.verdict.outputs.value }}
           CREDENTIAL: ${{ steps.review_result.outputs.credential }}
+          ACTION_OUTCOME: ${{ steps.review_result.outputs.step_outcome }}
         run: |
           set -euo pipefail
 
@@ -1166,6 +1187,39 @@ jobs:
               cause_headline="AI review unavailable — Anthropic API outage"
               ;;
           esac
+
+          # THE ACTION THAT NEVER STARTED. No API status, because no request
+          # was made: the action's step ended GREEN and wrote no execution
+          # trace at all. A review that crashes still writes one — that is
+          # what explain-failure.sh reads — so this pair is the signature of
+          # an exit before any work. A step that ended RED did run and fail,
+          # and keeps whatever cause the chain above found for it.
+          #
+          # Its documented cause is the GitHub App's workflow validation. The
+          # App requires every reusable workflow a run calls to exist on the
+          # default branch with IDENTICAL content, so a pull request that
+          # changes one is refused until it is merged. The action says so in
+          # its log and exits 0: "Exiting due to workflow validation skip".
+          #
+          # Measured on this repository's own pull request #40, which changes
+          # this file: the job went green in 19 seconds, the outcome check
+          # published `neutral`, and the notice on the pull request read "The
+          # reviewer did not complete" — the same sentence a timeout, an
+          # expired token and a crash produce. That sentence sends a
+          # maintainer hunting for a quota problem that does not exist.
+          #
+          # It is also the FIRST experience of every repository that installs
+          # the wrapper by pull request, which is what install-wrapper.sh
+          # creates: the first review is refused, for a reason the notice does
+          # not name. The wording below states what was observed and the
+          # documented cause, and says what to check when it does not apply —
+          # it does not claim certainty this step cannot have.
+          if [ -z "$cause" ] && [ -z "${EXECUTION_FILE:-}" ] \
+             && [ "${ACTION_OUTCOME:-}" = success ]; then
+            cause="the reviewer exited before starting — it reported success and wrote no execution trace, which is what the Claude GitHub App does when it refuses a run. The App requires every workflow this run calls to exist on the default branch with identical content, so a pull request that CHANGES a workflow file is refused until that change is merged"
+            recourse="If this pull request changes a workflow file, that is expected and nothing here is broken: it will be reviewed once the change is on the default branch. If it does not, the \`AI review\` job log holds the action's own reason."
+            cause_headline="AI review unavailable — the reviewer was refused before it started"
+          fi
 
           # This step now answers "no summary was posted", which is not the same
           # as "the reviewer failed" — it also catches a review that finished

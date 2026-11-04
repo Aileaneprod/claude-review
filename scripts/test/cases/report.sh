@@ -1193,3 +1193,85 @@ print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
 assert_not_contains "no findings of \`coderabbitai\` at all" \
   "an empty window is not reported as a missing reviewer" -- _report
 assert_not_contains "no data" "and no row claims missing data" -- _report
+
+# --- an unread severity cannot be a pass --------------------------------------
+#
+# Raised by the other reviewer on this change's own pull request (#40), and it
+# was right twice over. The first version of the unreadable-severity notice
+# suppressed itself as soon as ANY finding of theirs came out blocking, and it
+# left the verdict alone — so on a window past MIN_BOTH with the criterion at
+# 0, the row read PASS, the strongest claim this page makes, while findings of
+# theirs the author had ACCEPTED sat there with no severity anyone had read.
+
+# Fifteen pull requests reviewed by both, the criterion at 0 — a window that
+# has earned a PASS on the blocking row — plus one accepted finding of theirs
+# whose severity this page cannot read.
+_seed_unread() {
+  rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+  python3 -c "
+import json, sys
+unread = sys.argv[2] == 'yes'
+for pr in range(1, 16):
+    theirs = [{'reviewer': 'coderabbitai', 'path': 'b.ts', 'line': 2,
+               'finding': '🟡 Nit — y', 'author_reply': 'Retenu',
+               'verdict_keyword': 'accepted'}]
+    if unread and pr == 1:
+        theirs.append({'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                       'finding': 'A plain sentence with no pellet at all.',
+                       'author_reply': 'Corrige', 'verdict_keyword': 'accepted'})
+    json.dump({'repo': 'Aileaneprod/korbyx', 'pr': pr, 'title': 't',
+               'reviewed_by_ours': True,
+               'findings': [{'reviewer': 'claude', 'path': 'a.ts', 'line': 1,
+                             'finding': '🟠 Important — x', 'author_reply': 'Retenu',
+                             'verdict_keyword': 'accepted'}] + theirs},
+              open('%s/%d.json' % (sys.argv[1], pr), 'w', encoding='utf-8'))
+" "$(_led)/Aileaneprod/korbyx" "$1"
+}
+
+it "earns the PASS when every severity of theirs was read"
+_seed_unread no
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | PASS |" \
+  "a fully readable window passes on its own" -- _report
+
+it "withholds the PASS while an accepted finding of theirs has no severity"
+_seed_unread yes
+assert_contains "| Blocking findings of theirs we did not raise | 0 | 0 | not yet (severity unread) |" \
+  "the strongest claim on the page is not made on untested input" -- _report
+assert_not_contains "| Blocking findings of theirs we did not raise | 0 | 0 | PASS |" \
+  "and the PASS is gone" -- _report
+assert_contains "the author accepted 1 of those" \
+  "the sentence counts the accepted ones, which are what the criterion draws from" -- _report
+
+# A readable blocking finding does not make the unreadable ones readable, and
+# the ones hidden behind it are exactly what is at stake.
+it "keeps warning when another finding of theirs did come out blocking"
+rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_finding coderabbitai accepted blocking b),
+                               {'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                                'finding': 'A plain sentence with no pellet at all.',
+                                'author_reply': 'Corrige', 'verdict_keyword': 'accepted'}]}))
+" | _seed
+assert_contains "carry no severity this page can read" \
+  "a blocking finding beside it does not silence the warning" -- _report
+
+# A REJECTED finding with no severity could not have been a blocking miss, so
+# it must not hold the criterion back.
+it "ignores an unreadable severity the author rejected"
+rm -rf "$(_led)"; mkdir -p "$(_led)/Aileaneprod/korbyx"
+python3 -c "
+import json
+print(json.dumps({'repo': 'Aileaneprod/korbyx', 'pr': 1, 'title': 't',
+                  'reviewed_by_ours': True,
+                  'findings': [$(_finding claude accepted important a),
+                               $(_finding coderabbitai accepted nit b),
+                               {'reviewer': 'coderabbitai', 'path': 'c.ts', 'line': 3,
+                                'finding': 'A plain sentence with no pellet at all.',
+                                'author_reply': 'Ecarte', 'verdict_keyword': 'rejected'}]}))
+" | _seed
+assert_not_contains "carry no severity this page can read" \
+  "a rejected finding cannot have been a blocking miss" -- _report
