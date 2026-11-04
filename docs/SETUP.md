@@ -682,9 +682,13 @@ it, leave the secret unset — the workflow stops at its first step, writes what
 is missing to the job summary, fails nothing, and you run
 `rereview-open-prs.sh` by hand after an outage as above.
 
-However it is triggered, the pass is bounded: at most 5 replays per repository
-and 10 across the run, because each replay costs a full review and quota is
-what runs out. A repository the budget did not reach is named in the job
+Every replaying pass is bounded by a budget, because each replay costs a full
+review and quota is what runs out. 5 replays per repository and 10 across the
+run are the **defaults**, and they are what governs the schedule; a manual
+dispatch overrides them with its `limit` and `budget` inputs, as the example
+below does with `budget=6`. What does not change is that a replay needs a
+budget at all: `rereview-all.sh` refuses `--rerun` without `--budget`. A
+repository the budget did not reach is named in the job
 summary rather than quietly skipped, and so is one whose wrapper lacks
 `checks: write` — there, an unreviewed push leaves no trace at all, and a pass
 that said nothing would be reporting a clean sweep it never saw. If quota is
