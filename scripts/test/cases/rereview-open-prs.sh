@@ -279,13 +279,19 @@ assert_contains "wait for the limit to reset" \
 assert_not_contains "expired, revoked" \
   "and does not call a working credential expired" -- cat "$TESTTMP/rop-rate"
 
-it "still says missing wrapper when the wrapper is missing"
+# A 404 is EITHER a missing wrapper or a private repository the credential
+# cannot see — GitHub answers 404 for the second as well. This case used to
+# assert the secret was NOT named on a 404, which recorded the defect rather
+# than guarding against it. Raised by CodeRabbit on #18.
+it "names both causes a 404 can have"
 _setup
 GH_WRAPPER_ERR='gh: Not Found (HTTP 404)' _report >"$TESTTMP/rop-404" 2>&1 || true
 assert_contains "wired to claude-review" \
-  "a genuine 404 keeps the hypothesis that fits it" -- cat "$TESTTMP/rop-404"
-assert_not_contains "REREVIEW_GITHUB_TOKEN" \
-  "and does not blame a credential that worked" -- cat "$TESTTMP/rop-404"
+  "a 404 keeps the missing-wrapper hypothesis" -- cat "$TESTTMP/rop-404"
+assert_contains "cannot read o/r" \
+  "and names the credential that cannot see the repository" -- cat "$TESTTMP/rop-404"
+assert_not_contains "expired, revoked" \
+  "without calling the credential expired, which a 404 does not show" -- cat "$TESTTMP/rop-404"
 
 # --- replays that were all refused are not a clean pass -----------------------
 #

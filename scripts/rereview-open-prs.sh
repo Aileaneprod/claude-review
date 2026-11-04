@@ -128,7 +128,12 @@ if ! gh api "repos/${repo}/contents/${workflow}" -H "Accept: application/vnd.git
     *401*|*403*|*[Bb]ad\ credentials*|*"Resource not accessible"*)
       die "could not read ${workflow} on ${repo}: GitHub refused the credential \`gh\` is using: it is expired, revoked, or not authorised for ${repo}. In the scheduled catch-up that credential is the \`REREVIEW_GITHUB_TOKEN\` secret — a fine-grained token expires within a year, and an expired one is still SET, so the credential guard upstream does not catch it; replace that secret. Run by hand, it is whatever \`gh auth status\` shows. Nothing in ${repo} needs changing. ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))" ;;
   esac
-  die "no wrapper at ${workflow} on ${repo} — is this repository wired to claude-review? ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))"
+  # A 404 carries TWO hypotheses, not one. GitHub answers 404, not 403, for a
+  # private repository the credential cannot see, so a fine-grained
+  # REREVIEW_GITHUB_TOKEN whose repository list leaves ${repo} out arrives here
+  # looking exactly like a missing wrapper. Naming only the wrapper sent the
+  # reader to check a file that may be fine. Raised by CodeRabbit on #18.
+  die "no wrapper at ${workflow} on ${repo}, or the credential \`gh\` is using cannot read ${repo} — GitHub answers 404 for a private repository a token cannot see. Is this repository wired to claude-review, and is it in the repository list of that credential (in the scheduled catch-up, the \`REREVIEW_GITHUB_TOKEN\` secret)? ($(head -1 "${work_dir}/wrapper.err" 2>/dev/null))"
 fi
 # Anchored, and a `#` before it disqualifies the line. `grep 'checks: *write'`
 # was satisfied by a wrapper that merely MENTIONS the permission — a commented
