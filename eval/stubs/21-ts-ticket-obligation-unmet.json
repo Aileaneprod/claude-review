@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 6,
+  "session_id": "stub-21",
+  "structured_output": {
+    "findings": [
+      {
+        "path": "src/starterPack.ts",
+        "line": 50,
+        "severity": "blocking",
+        "title": "Alerts are overwritten even when a person changed them by hand, which ticket criterion 2 forbids",
+        "evidence": "await tx.alerts.upsert(workspaceId, {",
+        "why_it_matters": "Dashboards are skipped when their source is not \"pack\", but every alert of the pack is upserted, and alerts.upsert in db.ts replaces metric and threshold on conflict. A threshold a customer tuned on an alert with a pack key is reset on every run of the loader.",
+        "suggested_fix": "Read the alert first with tx.alerts.findByKey and keep it when its source is not \"pack\", as the dashboards loop does, and report it in the summary."
+      }
+    ]
+  }
+}

@@ -144,3 +144,26 @@ printf 'keep me' >"$TESTTMP/precious/notes.txt"
 assert_status 1 "a foreign, non-empty --out-dir is refused" -- \
   env PATH="$(_path_with_fake)" "$_EVAL" --live --fixture "$_FIX" --out-dir "$TESTTMP/precious"
 assert_equal "keep me" "$(cat "$TESTTMP/precious/notes.txt")" "and its content is untouched"
+
+# --- a fixture that ships a ticket ---------------------------------------------
+#
+# base.md step 1b tells the reviewer to read `.claude-review-tooling/context/
+# ticket.md`, and review.yml writes the ticket there. A fixture that tests a
+# ticket ships it at the same path. Two things must hold: the reviewer, which
+# runs from the fixture directory, can read it; and it is not listed among the
+# changed files, because in production it is context, never code under review.
+
+it "lets the reviewer read a fixture's ticket, and keeps it out of the changed files"
+_fake 'import os
+findings = [{"path": "src/starterPack.ts", "line": 50, "severity": "important", "title": "alerts are overwritten by the loader", "evidence": "await tx.alerts.upsert(workspaceId, {"}] if os.path.exists(".claude-review-tooling/context/ticket.md") else []'
+assert_status 0 "the planted defect is found where the ticket is readable" -- \
+  env PATH="$(_path_with_fake)" "$_EVAL" --live --fixture 21-ts-ticket-obligation-unmet --out-dir "$TESTTMP/eval-ticket"
+assert_contains "src/starterPack.ts" "the changed file is listed" -- \
+  cat "$TESTTMP/eval-ticket/21-ts-ticket-obligation-unmet.files.txt"
+assert_not_contains ".claude-review-tooling" "the ticket is not listed as a changed file" -- \
+  cat "$TESTTMP/eval-ticket/21-ts-ticket-obligation-unmet.files.txt"
+# The section is read between its heading and the paragraph after the list.
+# The positive witness comes first: an empty section would pass the negative.
+_scope() { sed -n '/^# Files in scope/,/^If you found nothing/p' "$TESTTMP/fakestate/prompt.1"; }
+assert_contains "src/starterPack.ts" "the prompt's file list carries the changed file" -- _scope
+assert_not_contains "context/ticket.md" "and not the ticket" -- _scope
