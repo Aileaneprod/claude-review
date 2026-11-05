@@ -227,8 +227,14 @@ for name in "${fixtures[@]}"; do
   profile="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("profile","generic"))' \
     "${eval_dir}/expected/${name}.json")"
 
-  # Files in scope: everything in the fixture except the diff itself.
+  # Files in scope: everything in the fixture except the diff itself, and except
+  # `.claude-review-tooling/`. A fixture that tests a ticket ships it at
+  # `.claude-review-tooling/context/ticket.md`, the path review.yml writes it to
+  # and base.md step 1b tells the reviewer to read; there it is context, as in
+  # production, not a changed file to review. Committed with the fixture rather
+  # than written at run time, so a run never adds files to the tracked tree.
   ( cd "$fixture_dir" && find . -type f ! -name 'changes.diff' \
+      ! -path './.claude-review-tooling/*' \
       | sed 's|^\./||' | sort ) >"${out_dir}/${name}.files.txt"
 
   "${repo_root}/scripts/build-prompt.sh" \

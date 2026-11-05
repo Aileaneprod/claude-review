@@ -1,0 +1,49 @@
+{
+  "profile": "node-typescript",
+  "summary": "The ticket forbids overwriting anything a person created or changed by hand, dashboards and alerts alike. loadStarterPack keeps hand-edited dashboards (source !== \"pack\") but upserts every alert unconditionally, and alerts.upsert in db.ts overwrites on conflict, so a hand-tuned alert with a pack key is replaced. The all-or-nothing criterion is met by withTransaction in db.ts, outside the diff, and is the decoy.",
+  "origin": "a real miss: the ticket protected two kinds of hand-made content and the change guarded only one; the reviewer had the ticket and did not hold the code against it",
+  "must_find": [
+    {
+      "id": "hand-edited-alert-overwritten",
+      "path": "src/starterPack.ts",
+      "min_severity": "important",
+      "any_of": [
+        "alerts are overwritten",
+        "alert is overwritten",
+        "overwrites alerts",
+        "overwrites an alert",
+        "overwrite alerts",
+        "alerts a person",
+        "alert a person",
+        "alerts that a person",
+        "alerts edited by hand",
+        "alerts changed by hand",
+        "alerts created by hand",
+        "hand-edited alert",
+        "hand-tuned alert",
+        "alerts are not protected",
+        "alerts are upserted",
+        "upserts every alert"
+      ]
+    }
+  ],
+  "must_not_find": [
+    {
+      "id": "decoy-load-is-not-atomic",
+      "path": "src/starterPack.ts",
+      "any_of": [
+        "not atomic",
+        "no transaction",
+        "without a transaction",
+        "outside a transaction",
+        "not in a transaction",
+        "partially written",
+        "partial load",
+        "not all or nothing",
+        "is not rolled back",
+        "never rolled back"
+      ],
+      "why": "loadStarterPack runs inside withTransaction, which db.ts defines as BEGIN ... COMMIT with ROLLBACK on any error, so criterion 3 is met. Flagging it means the reviewer judged the criterion from the diff without reading the helper it calls. No keyword is a string of the diff."
+    }
+  ]
+}
