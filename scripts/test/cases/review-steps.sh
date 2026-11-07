@@ -219,7 +219,7 @@ it "retries the same review, not a different one"
 # The fallback is a second attempt at the SAME review. Any input that differs
 # but the credential — another prompt, other claude_args — would make the
 # retry a different review, announced as the same one.
-_without_token() { _step "$1" with | grep -v '^claude_code_oauth_token:'; }
+_without_token() { _step "$1" with | grep -v '^claude_code_oauth_token:\|^anthropic_api_key:'; }
 # Two empty blocks are equal too; make sure there is something being compared.
 assert_contains 'claude_args: ${{ steps.args.outputs.value }}' \
   "the first attempt's inputs were read" -- _step claude with
@@ -231,8 +231,8 @@ for field in uses continue-on-error timeout-minutes; do
 done
 
 it "spends the other account, not the same one twice"
-assert_equal 'claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}' \
-  "$(_step claude with | grep '^claude_code_oauth_token:')" "the first attempt uses the first token"
+assert_equal "claude_code_oauth_token: \${{ secrets.ANTHROPIC_API_KEY == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}" \
+  "$(_step claude with | grep '^claude_code_oauth_token:')" "the first attempt uses the first token, unless an API key is set"
 assert_equal 'claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK }}' \
   "$(_step claude_fallback with | grep '^claude_code_oauth_token:')" "the retry uses the fallback token"
 
@@ -243,9 +243,47 @@ assert_equal "steps.fallback.outputs.use == 'yes'" "$(_step claude_fallback if)"
 it "lets only a yes or a no of the fallback secret into the decision step"
 # The decision step runs after the checkout, in the pull request's working
 # directory. It needs to know whether a fallback exists, never what it is.
-assert_equal "FALLBACK_AVAILABLE: \${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK != '' && 'yes' || 'no' }}" \
+assert_equal "FALLBACK_AVAILABLE: \${{ secrets.ANTHROPIC_API_KEY == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK != '' && 'yes' || 'no' }}" \
   "$(_step fallback env | grep 'CLAUDE_CODE_OAUTH_TOKEN_FALLBACK')" \
   "the secret appears once, inside a comparison, and nowhere else"
+
+# --- an API key: one credential, no fallback (korbyx KOR-771) -------------------
+
+it "hands the action the API key, and blanks the token when the key is set"
+assert_equal 'anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}' \
+  "$(_step claude with | grep '^anthropic_api_key:')" "the first attempt passes the key"
+assert_equal "" "$(_step claude_fallback with | grep '^anthropic_api_key:')" \
+  "the retry never receives the key"
+
+it "never offers the fallback behind an API key"
+# A refused key (its workspace's spend limit reached) must end the review with
+# its notice, not move the cost onto a person's subscription.
+assert_contains "secrets.ANTHROPIC_API_KEY == '' &&" \
+  "the fallback's availability is conditioned on the key's absence" -- _step fallback env
+
+it "accepts the API key alone as the reviewer's credential"
+box="$(_sandbox guard-key)"
+_run_step credential "$box" ANTHROPIC_API_KEY=sk-test CLAUDE_CODE_OAUTH_TOKEN=
+assert_equal "true" "$(_output "$box" present)" "a key alone is a credential"
+assert_equal "api_key" "$(_output "$box" kind)" "and the step says which kind"
+assert_not_contains "sk-test" "the key itself is never printed" -- cat "$box/log" "$box/summary"
+
+it "prefers the API key when both are set"
+box="$(_sandbox guard-both)"
+_run_step credential "$box" ANTHROPIC_API_KEY=sk-test CLAUDE_CODE_OAUTH_TOKEN=tok
+assert_equal "api_key" "$(_output "$box" kind)" "the key wins"
+
+it "still runs on the token alone"
+box="$(_sandbox guard-token)"
+_run_step credential "$box" ANTHROPIC_API_KEY= CLAUDE_CODE_OAUTH_TOKEN=tok
+assert_equal "true" "$(_output "$box" present)" "a token alone is still a credential"
+assert_equal "oauth" "$(_output "$box" kind)" "of the token kind"
+
+it "stops cheaply when neither is set"
+box="$(_sandbox guard-none)"
+_run_step credential "$box" ANTHROPIC_API_KEY= CLAUDE_CODE_OAUTH_TOKEN=
+assert_equal "false" "$(_output "$box" present)" "no credential, no review"
+assert_contains "ANTHROPIC_API_KEY" "and the summary names both ways to fix it" -- cat "$box/summary"
 
 # --- the decision, executed ----------------------------------------------------
 
@@ -375,6 +413,24 @@ assert_contains '`CLAUDE_CODE_OAUTH_TOKEN` secret' \
   "the comment names the first secret" -- cat "$box/posted"
 assert_not_contains "CLAUDE_CODE_OAUTH_TOKEN_FALLBACK" \
   "and does not mention a fallback that never ran" -- cat "$box/posted"
+
+it "names the API key when it is the key that was rejected"
+box="$(_sandbox notice-key)"
+_run_step "Report that the review was unavailable" "$box" \
+  EXECUTION_FILE="$FIXTURES/auth-401.json" VERDICT=unavailable CREDENTIAL=primary CREDENTIAL_KIND=api_key \
+  PR_NUMBER=1 HEAD_SHA=0000000 GH_TOKEN=unused
+assert_contains '`ANTHROPIC_API_KEY` secret' \
+  "the comment names the key" -- cat "$box/posted"
+assert_contains "ANTHROPIC_API_KEY was rejected" \
+  "and so does the check's headline" -- cat "$box/posted"
+
+it "calls a refused key a workspace limit, not a subscription one"
+box="$(_sandbox notice-key-429)"
+_run_step "Report that the review was unavailable" "$box" \
+  EXECUTION_FILE="$FIXTURES/api-429-quota.json" VERDICT=unavailable CREDENTIAL=primary CREDENTIAL_KIND=api_key \
+  PR_NUMBER=1 HEAD_SHA=0000000 GH_TOKEN=unused
+assert_contains "Console workspace behind" "the cause names the workspace" -- cat "$box/posted"
+assert_not_contains "subscription" "and no subscription" -- cat "$box/posted"
 
 # --- what a caller may record about the run ------------------------------------
 

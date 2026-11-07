@@ -285,6 +285,25 @@ for the ones that don't.
 *recipe*; it never shares the *credential*. Every repo that wants a review
 needs its own copy of this secret, set via 3a/3b/3c above.
 
+### 3e-bis. An API key instead of a subscription token (optional)
+
+A repository can pay for its reviews as API usage instead of a Claude
+subscription: set `ANTHROPIC_API_KEY` to a key from a Console workspace kept for
+agents, give that workspace a spend limit, and pass it from the wrapper by name:
+
+```bash
+gh secret set ANTHROPIC_API_KEY --repo OWNER/REPO
+```
+
+```yaml
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+When the key is set it is the only credential used: `CLAUDE_CODE_OAUTH_TOKEN`
+is ignored and the fallback below is never tried, so a refused key ends the
+review with its notice instead of moving the cost onto a person's subscription.
+Without it, nothing changes.
+
 ### 3f. A fallback token, so a usage limit is not an outage (optional)
 
 The subscription behind `CLAUDE_CODE_OAUTH_TOKEN` reached its weekly limit on

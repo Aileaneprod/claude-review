@@ -128,9 +128,22 @@ on:
         type: boolean
         default: false
     secrets:
+      ANTHROPIC_API_KEY:
+        description: >-
+          Optional. An Anthropic API key, billed as API usage to the Console
+          workspace that issued it. When set, it is the ONLY credential the
+          review uses: CLAUDE_CODE_OAUTH_TOKEN is ignored and the fallback is
+          never tried, so a refusal (a spend limit reached, a revoked key) ends
+          the review with its notice instead of moving the cost onto a person's
+          subscription. Give the workspace a spend limit: the review has no
+          budget of its own. One of ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN
+          must be set.
+        required: false
       CLAUDE_CODE_OAUTH_TOKEN:
-        description: "Claude Code OAuth token from `claude setup-token`."
-        required: true
+        description: >-
+          Claude Code OAuth token from `claude setup-token`. Required unless
+          ANTHROPIC_API_KEY is set, in which case it is ignored.
+        required: false
       CLAUDE_CODE_OAUTH_TOKEN_FALLBACK:
         description: >-
           Optional. A second Claude Code OAuth token, used ONLY when the first
@@ -276,24 +289,32 @@ jobs:
       - name: Guard — reviewer credential present
         id: credential
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+          if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+            printf 'present=true\n' >> "$GITHUB_OUTPUT"
+            printf 'kind=api_key\n' >> "$GITHUB_OUTPUT"
+            echo "Credential present: ANTHROPIC_API_KEY (no fallback on this run)."
+          elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            printf 'present=true\n' >> "$GITHUB_OUTPUT"
+            printf 'kind=oauth\n' >> "$GITHUB_OUTPUT"
+            echo "Credential present: CLAUDE_CODE_OAUTH_TOKEN."
+          else
             printf 'present=false\n' >> "$GITHUB_OUTPUT"
             {
               echo "### AI review skipped — no credential"
               echo
-              echo "\`CLAUDE_CODE_OAUTH_TOKEN\` is not set on this repository, so the"
-              echo "reviewer cannot authenticate and no review was attempted."
+              echo "Neither \`ANTHROPIC_API_KEY\` nor \`CLAUDE_CODE_OAUTH_TOKEN\` is set on"
+              echo "this repository, so the reviewer cannot authenticate and no review"
+              echo "was attempted."
               echo
-              echo "Fix: \`gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo $GITHUB_REPOSITORY\`"
+              echo "Fix: \`gh secret set ANTHROPIC_API_KEY --repo $GITHUB_REPOSITORY\`, or"
+              echo "\`gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo $GITHUB_REPOSITORY\`."
               echo "See step 3 of claude-review's docs/SETUP.md."
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::warning title=AI review skipped::CLAUDE_CODE_OAUTH_TOKEN is not set on this repository"
-          else
-            printf 'present=true\n' >> "$GITHUB_OUTPUT"
-            echo "Credential present."
+            echo "::warning title=AI review skipped::neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set on this repository"
           fi
 
       # Which claude-review revision supplies the scripts and prompts.
@@ -763,7 +784,11 @@ jobs:
         timeout-minutes: 30
         uses: anthropics/claude-code-action@v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Exactly one credential reaches the action. With an API key, the
+          # OAuth token is blanked: `a == '' && b || ''` gives b when there is
+          # no key, and '' when there is one.
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_code_oauth_token: ${{ secrets.ANTHROPIC_API_KEY == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # The condition is INVERTED on purpose. GitHub's `a && b || c` returns
           # the operand, not a boolean, so the natural-looking
           #   ${{ inputs.use_github_app && '' || github.token }}
@@ -800,7 +825,9 @@ jobs:
         continue-on-error: true
         env:
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
-          FALLBACK_AVAILABLE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK != '' && 'yes' || 'no' }}
+          # No fallback behind an API key: a refused key (spend limit reached)
+          # must not move the review onto a person's subscription.
+          FALLBACK_AVAILABLE: ${{ secrets.ANTHROPIC_API_KEY == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN_FALLBACK != '' && 'yes' || 'no' }}
         run: |
           set -euo pipefail
           # One write, at the end. A step that dies before it leaves the output
@@ -1073,6 +1100,7 @@ jobs:
           EXECUTION_FILE: ${{ steps.review_result.outputs.execution_file }}
           VERDICT: ${{ steps.verdict.outputs.value }}
           CREDENTIAL: ${{ steps.review_result.outputs.credential }}
+          CREDENTIAL_KIND: ${{ steps.credential.outputs.kind }}
         run: |
           set -euo pipefail
 
@@ -1082,6 +1110,9 @@ jobs:
           # — which was only rate-limited — sends them to rotate the wrong
           # secret while the broken one stays broken.
           secret_name=CLAUDE_CODE_OAUTH_TOKEN
+          if [ "${CREDENTIAL_KIND:-}" = api_key ]; then
+            secret_name=ANTHROPIC_API_KEY
+          fi
           after_retry=""
           if [ "${CREDENTIAL:-}" = fallback ]; then
             secret_name=CLAUDE_CODE_OAUTH_TOKEN_FALLBACK
@@ -1142,7 +1173,11 @@ jobs:
           cause_headline=""
           case "$api_status" in
             429)
-              cause="the subscription behind \`$secret_name\` has hit its usage limit, so Anthropic refused the request (HTTP 429)$after_retry"
+              if [ "${CREDENTIAL_KIND:-}" = api_key ]; then
+                cause="the Console workspace behind \`$secret_name\` has hit its rate or spend limit, so Anthropic refused the request (HTTP 429)"
+              else
+                cause="the subscription behind \`$secret_name\` has hit its usage limit, so Anthropic refused the request (HTTP 429)$after_retry"
+              fi
               recourse="Nothing is lost: push again, or re-run this workflow, once the limit resets, and this code gets reviewed then."
               cause_headline="AI review unavailable — the reviewer's usage limit is reached"
               ;;
